@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %} — {{ zdroj }} detail{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>
+    <a href="{{ url_for('lists_list') }}" style="color:var(--muted);text-decoration:none;font-weight:400">Listy</a>
+    <span style="color:var(--border)"> / </span>
+    <a href="{{ url_for('list_detail', list_id=lst.id) }}" style="color:var(--muted);text-decoration:none;font-weight:400">{{ lst.nazev }}</a>
+    <span style="color:var(--border)"> / </span>
+    {{ zdroj }}
+  </h1>
+  <p>Top IP adresy dle cetnosti</p>
+</div>
+
+<div class="stat-grid">
+  <div class="stat-card">
+    <div class="label">Top dnes</div>
+    <div class="value accent">{{ top_dnes | length }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Top 30 dni</div>
+    <div class="value">{{ top30 | length }}</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">Top 5 dnes</div>
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>IP adresa</th>
+        <th>Pocet udalosti</th>
+        <th>Posledni vyskyt</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in top_dnes %}
+      <tr>
+        <td class="mono" style="color:var(--muted)">{{ loop.index }}</td>
+        <td class="mono" style="color:var(--text-hi)">{{ row.ipadresa }}</td>
+        <td class="mono" style="color:var(--accent)">{{ row.pocet }}</td>
+        <td class="mono">{{ row.posledni.strftime('%Y-%m-%d %H:%M') if row.posledni else '—' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" style="color:var(--muted);text-align:center;padding:24px">Zadne udalosti dnes.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <div class="card-title">Top 50 za poslednich 30 dni</div>
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>IP adresa</th>
+        <th>Pocet udalosti</th>
+        <th>Posledni vyskyt</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in top30 %}
+      <tr>
+        <td class="mono" style="color:var(--muted)">{{ loop.index }}</td>
+        <td class="mono" style="color:var(--text-hi)">{{ row.ipadresa }}</td>
+        <td class="mono" style="color:var(--accent)">{{ row.pocet }}</td>
+        <td class="mono">{{ row.posledni.strftime('%Y-%m-%d %H:%M') if row.posledni else '—' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" style="color:var(--muted);text-align:center;padding:24px">Zadne udalosti za poslednich 30 dni.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

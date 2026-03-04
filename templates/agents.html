@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %} — Agenti{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Agenti</h1>
+  <p>Prehled registrovanych Windows agentu</p>
+</div>
+
+<div class="card">
+  <table>
+    <thead>
+      <tr>
+        <th>Hostname</th>
+        <th>FQDN</th>
+        <th>Skupina</th>
+        <th>IP adresa</th>
+        <th>Verze</th>
+        <th>Posledni kontakt</th>
+        <th>Registrovan</th>
+        <th>Status</th>
+        <th>Akce</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for a in agents %}
+      <tr>
+        <td class="mono" style="color:var(--text-hi)">{{ a.hostname }}</td>
+        <td class="mono" style="color:var(--muted)">{{ a.fqdn or '—' }}</td>
+        <td><span class="badge badge-off">{{ a.group_name or '—' }}</span></td>
+        <td class="mono">{{ a.ip_adresa or '—' }}</td>
+        <td class="mono" style="color:var(--muted)">{{ a.verze_agenta or '—' }}</td>
+        <td class="mono">{{ a.posledni_kontakt.strftime('%Y-%m-%d %H:%M') if a.posledni_kontakt else '—' }}</td>
+        <td class="mono">{{ a.vytvoreno.strftime('%Y-%m-%d') if a.vytvoreno else '—' }}</td>
+        <td>
+          {% if not a.aktivni %}
+            <span class="badge badge-off">deaktivovan</span>
+          {% elif a.posledni_kontakt and (now - a.posledni_kontakt).total_seconds() < 3600 %}
+            <span class="dot dot-on"></span><span style="color:var(--accent);font-size:12px">online</span>
+          {% else %}
+            <span class="dot dot-off"></span><span style="color:var(--muted);font-size:12px">offline</span>
+          {% endif %}
+        </td>
+        <td>
+          <form class="inline" method="POST" action="{{ url_for('agent_toggle', agent_id=a.id) }}">
+            <button class="btn btn-ghost btn-sm">{{ '▶ Aktivovat' if not a.aktivni else '⏸ Deaktivovat' }}</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="9" style="color:var(--muted);text-align:center;padding:24px">Zadni agenti.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %} — Klient: {{ client.nazev }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>
+    <a href="{{ url_for('clients_list') }}" style="color:var(--muted);text-decoration:none;font-weight:400">Klienti</a>
+    <span style="color:var(--border)"> / </span>
+    {{ client.nazev }}
+  </h1>
+  <p>{{ client.poznamka or 'Bez poznamky' }}</p>
+</div>
+
+<div class="card">
+  <div class="card-title">Pridat whitelist zaznam</div>
+  <form method="POST" action="{{ url_for('client_whitelist_add', client_id=client.id) }}">
+    <div class="form-row">
+      <div class="form-group">
+        <label>Zaznam</label>
+        <input type="text" name="zaznam" placeholder="1.2.3.4 nebo firma.cz nebo *.firma.cz" required>
+      </div>
+      <div class="form-group">
+        <label>Typ</label>
+        <select name="list_type">
+          <option value="ip">IP / CIDR</option>
+          <option value="fqdn">FQDN</option>
+          <option value="url">URL</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:1">
+        <label>Poznamka</label>
+        <input type="text" name="poznamka" placeholder="proc je tato adresa povolena...">
+      </div>
+      <button type="submit" class="btn btn-primary">+ Pridat</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-title">Whitelist zaznamy ({{ entries | length }})</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Zaznam</th>
+        <th>Typ</th>
+        <th>Poznamka</th>
+        <th>Pridano</th>
+        <th>Status</th>
+        <th>Akce</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in entries %}
+      <tr>
+        <td class="mono" style="color:var(--text-hi)">{{ e.zaznam }}</td>
+        <td><span class="badge badge-{{ e.list_type }}">{{ e.list_type }}</span></td>
+        <td style="color:var(--muted);font-size:12px">{{ e.poznamka or '—' }}</td>
+        <td class="mono">{{ e.vytvoreno.strftime('%Y-%m-%d') if e.vytvoreno else '—' }}</td>
+        <td>
+          {% if e.enabled %}
+            <span class="badge badge-on">aktivni</span>
+          {% else %}
+            <span class="badge badge-off">vypnuto</span>
+          {% endif %}
+        </td>
+        <td>
+          <div style="display:flex;gap:6px">
+            <form class="inline" method="POST"
+                  action="{{ url_for('client_whitelist_toggle', client_id=client.id, entry_id=e.id) }}">
+              <button class="btn btn-ghost btn-sm">{{ '⏸ Vypnout' if e.enabled else '▶ Zapnout' }}</button>
+            </form>
+            <form class="inline" method="POST"
+                  action="{{ url_for('client_whitelist_delete', client_id=client.id, entry_id=e.id) }}"
+                  onsubmit="return confirm('Smazat zaznam?')">
+              <button class="btn btn-danger btn-sm">✕</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" style="color:var(--muted);text-align:center;padding:24px">Zadne whitelist zaznamy.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if client_lists %}
+<div class="card">
+  <div class="card-title">Listy tohoto klienta</div>
+  <table>
+    <thead>
+      <tr><th>Nazev</th><th>Typ</th><th>Status</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for l in client_lists %}
+      <tr>
+        <td style="color:var(--text-hi)">{{ l.nazev }}</td>
+        <td><span class="badge badge-{{ l.list_type }}">{{ l.list_type }}</span></td>
+        <td>
+          {% if l.enabled %}
+            <span class="badge badge-on">aktivni</span>
+          {% else %}
+            <span class="badge badge-off">vypnuto</span>
+          {% endif %}
+        </td>
+        <td>
+          <a href="{{ url_for('list_detail', list_id=l.id) }}" class="btn btn-ghost btn-sm">⚙ Detail</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

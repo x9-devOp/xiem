@@ -1,0 +1,21 @@
+[Unit]
+Description=XIEM Flask API
+After=network.target postgresql.service
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/flask_xiem
+Environment="XIEM_DB_DSN=host=localhost port=5432 dbname=xiem user=xiem_writer password=CHANGE_ME"
+Environment="XIEM_AGENT_PATH=/var/www/flask_xiem/agent/xiem-agent.exe"
+ExecStart=/var/www/flask_xiem/venv/bin/gunicorn \
+    --workers 2 \
+    --bind 127.0.0.1:5000 \
+    --access-logfile /var/log/xiem/api-access.log \
+    --error-logfile /var/log/xiem/api-error.log \
+    app:app
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

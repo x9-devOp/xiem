@@ -1,0 +1,11 @@
+[Unit]
+Description=XIEM generate IP lists
+After=network.target postgresql.service
+
+[Service]
+Type=oneshot
+User=www-data
+EnvironmentFile=/etc/xiem/env
+ExecStart=/usr/bin/python3 /usr/local/bin/generate_lists.py
+StandardOutput=journal
+StandardError=journal

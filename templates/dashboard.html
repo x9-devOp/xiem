@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %} — Dashboard{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Dashboard</h1>
+  <p>Prehled systemu v realnem case</p>
+</div>
+
+<div class="stat-grid">
+  <div class="stat-card">
+    <div class="label">Agenti online</div>
+    <div class="value accent">{{ agents_online }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Agenti celkem</div>
+    <div class="value">{{ agents_active }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Feed IP adres</div>
+    <div class="value">{{ feed_ips }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Aktivni feedy</div>
+    <div class="value">{{ feeds_active }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Manual IPs</div>
+    <div class="value">{{ manual_ips }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Auth failures 24h</div>
+    <div class="value warn">{{ auth_24h }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">ESET blocks 24h</div>
+    <div class="value warn">{{ eset_24h }}</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">Posledni aktivita agentu</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Hostname</th>
+        <th>FQDN</th>
+        <th>Skupina</th>
+        <th>IP</th>
+        <th>Posledni kontakt</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for a in recent_agents %}
+      <tr>
+        <td class="mono">{{ a.hostname }}</td>
+        <td class="mono" style="color:var(--muted)">{{ a.fqdn or '—' }}</td>
+        <td><span class="badge badge-off">{{ a.group_name or '—' }}</span></td>
+        <td class="mono">{{ a.ip_adresa or '—' }}</td>
+        <td class="mono">{{ a.posledni_kontakt.strftime('%Y-%m-%d %H:%M') if a.posledni_kontakt else '—' }}</td>
+        <td>
+          {% if a.posledni_kontakt and (now - a.posledni_kontakt).total_seconds() < 3600 %}
+            <span class="dot dot-on"></span><span style="color:var(--accent);font-size:12px">online</span>
+          {% else %}
+            <span class="dot dot-off"></span><span style="color:var(--muted);font-size:12px">offline</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" style="color:var(--muted);text-align:center;padding:24px">Zadni agenti</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

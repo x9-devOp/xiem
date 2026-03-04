@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %} — List: {{ lst.nazev }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>
+    <a href="{{ url_for('lists_list') }}" style="color:var(--muted);text-decoration:none;font-weight:400">Listy</a>
+    <span style="color:var(--border)"> / </span>
+    {{ lst.nazev }}
+    <span class="badge badge-{{ lst.list_type }}" style="margin-left:8px;vertical-align:middle">{{ lst.list_type }}</span>
+  </h1>
+  <p>{{ lst.popis or 'Bez popisu' }} &nbsp;·&nbsp;
+     <a href="https://xiem.x9.cz/IP_LISTS/{{ lst.nazev }}.txt" target="_blank"
+        style="color:var(--muted);font-size:12px">/IP_LISTS/{{ lst.nazev }}.txt ↗</a>
+  </p>
+</div>
+
+<div class="card">
+  <div class="card-title">Pridat zdroj</div>
+  <form method="POST" action="{{ url_for('list_source_add', list_id=lst.id) }}">
+    <div class="form-row">
+      <div class="form-group">
+        <label>Typ zdroje</label>
+        <select name="source_type" id="src-type" onchange="updateSourceId()">
+          <option value="auth_failures">auth_failures (Event 4625)</option>
+          <option value="eset_network">eset_network (ESET blocks)</option>
+          <option value="upstream_feed">upstream_feed</option>
+          <option value="manual">manual IPs</option>
+        </select>
+      </div>
+      <div class="form-group" id="src-feed-group" style="display:none">
+        <label>Feed</label>
+        <select name="source_id">
+          <option value="">— vyberte —</option>
+          {% for f in feeds %}
+          <option value="{{ f.id }}">{{ f.nazev }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="btn btn-primary">+ Pridat zdroj</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-title">Aktivni zdroje ({{ sources | length }})</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Typ</th>
+        <th>Zdroj</th>
+        <th>Zaznamu</th>
+        <th>Vaha</th>
+        <th>Doporuceno pro</th>
+        <th>Status</th>
+        <th>Akce</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in sources %}
+      <tr>
+        <td><span class="badge badge-off">{{ s.source_type }}</span></td>
+        <td style="color:var(--muted);font-size:12px">
+          {% if s.source_type == 'upstream_feed' and s.feed_nazev %}
+            {{ s.feed_nazev }}
+          {% elif s.source_type == 'auth_failures' %}
+            <a href="{{ url_for('list_source_auth_failures', list_id=lst.id) }}"
+               style="color:var(--accent);text-decoration:none">
+              Auth failures (Event 4625) ↗
+            </a>
+          {% elif s.source_type == 'eset_network' %}
+            <a href="{{ url_for('list_source_eset_network', list_id=lst.id) }}"
+               style="color:var(--accent);text-decoration:none">
+              ESET network blocks ↗
+            </a>
+          {% elif s.source_type == 'manual' %}
+            Vsechny manual IPs (typ=block)
+          {% else %}
+            —
+          {% endif %}
+        </td>
+        <td class="mono" style="color:var(--accent)">
+          {% if s.source_type == 'upstream_feed' %}
+            {{ s.feed_pocet or 0 }}
+          {% else %}
+            —
+          {% endif %}
+        </td>
+        <td class="mono">
+          {% if s.source_type == 'upstream_feed' %}
+            {{ s.feed_vaha or '3.0' }}
+          {% else %}
+            —
+          {% endif %}
+        </td>
+        <td>
+          {% if s.source_type == 'upstream_feed' %}
+            {% if s.feed_doporuceno == 'both' %}
+              <span class="badge badge-warn">both</span>
+            {% else %}
+              <span class="badge badge-off">inbound</span>
+            {% endif %}
+          {% else %}
+            —
+          {% endif %}
+        </td>
+        <td>
+          {% if s.enabled %}
+            <span class="badge badge-on">aktivni</span>
+          {% else %}
+            <span class="badge badge-off">vypnuto</span>
+          {% endif %}
+        </td>
+        <td>
+          <div style="display:flex;gap:6px">
+            <form class="inline" method="POST"
+                  action="{{ url_for('list_source_toggle', list_id=lst.id, source_id=s.id) }}">
+              <button class="btn btn-ghost btn-sm">{{ '⏸ Vypnout' if s.enabled else '▶ Zapnout' }}</button>
+            </form>
+            <form class="inline" method="POST"
+                  action="{{ url_for('list_source_delete', list_id=lst.id, source_id=s.id) }}"
+                  onsubmit="return confirm('Odebrat zdroj?')">
+              <button class="btn btn-danger btn-sm">✕</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" style="color:var(--muted);text-align:center;padding:24px">Zadne zdroje — list bude prazdny.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+function updateSourceId() {
+  var t = document.getElementById('src-type').value;
+  document.getElementById('src-feed-group').style.display =
+    (t === 'upstream_feed') ? 'flex' : 'none';
+}
+updateSourceId();
+</script>
+{% endblock %}

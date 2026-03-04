@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %} — Klienti{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Klienti</h1>
+  <p>Sprava klientu a jejich whitelistu</p>
+</div>
+
+<div class="card">
+  <div class="card-title">Pridat klienta</div>
+  <form method="POST" action="{{ url_for('client_add') }}">
+    <div class="form-row">
+      <div class="form-group">
+        <label>Nazev</label>
+        <input type="text" name="nazev" placeholder="napr. firma_abc" required pattern="[a-zA-Z0-9_\-]+"
+               title="Pouze pismena, cisla, _ a -">
+      </div>
+      <div class="form-group" style="flex:1">
+        <label>Poznamka</label>
+        <input type="text" name="poznamka" placeholder="volitelne">
+      </div>
+      <button type="submit" class="btn btn-primary">+ Pridat</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-title">Klienti ({{ clients | length }})</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Nazev</th>
+        <th>Poznamka</th>
+        <th>Whitelisty</th>
+        <th>Listy</th>
+        <th>Vytvoreno</th>
+        <th>Akce</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in clients %}
+      <tr>
+        <td style="color:var(--text-hi);font-weight:600">{{ c.nazev }}</td>
+        <td style="color:var(--muted);font-size:12px">{{ c.poznamka or '—' }}</td>
+        <td class="mono" style="color:var(--accent)">{{ c.whitelist_count }}</td>
+        <td class="mono" style="color:var(--muted)">{{ c.list_count }}</td>
+        <td class="mono">{{ c.vytvoreno.strftime('%Y-%m-%d') if c.vytvoreno else '—' }}</td>
+        <td>
+          <div style="display:flex;gap:6px">
+            <a href="{{ url_for('client_detail', client_id=c.id) }}" class="btn btn-ghost btn-sm">⚙ Whitelist</a>
+            <form class="inline" method="POST" action="{{ url_for('client_delete', client_id=c.id) }}"
+                  onsubmit="return confirm('Smazat klienta {{ c.nazev }} a vsechny jeho whitelisty?')">
+              <button class="btn btn-danger btn-sm">✕</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" style="color:var(--muted);text-align:center;padding:24px">Zadni klienti.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

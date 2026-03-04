@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <title>XIEM Blocklist UI</title>
+  <style>
+    body { font-family: sans-serif; max-width: 800px; margin: 2em auto; }
+    label { display:block; margin-top:1em; }
+    input, button { padding:0.5em; }
+    .flash { padding:0.5em; background:#dfd; margin-top:1em; }
+    table { width:100%; border-collapse:collapse; margin-top:1em;}
+    td,th { border:1px solid #ccc; padding:0.3em; }
+  </style>
+</head>
+<body>
+  <h1>XIEM Blocklist Management</h1>
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for cat,msg in messages %}
+      <div class="flash">{{ msg }}</div>
+    {% endfor %}
+  {% endwith %}
+
+  <form method="post">
+    <h2>Parametry Blocklistu</h2>
+    <label>HOURS:
+      <input name="HOURS" value="{{cfg['HOURS']}}">
+    </label>
+    <label>THRESHOLD:
+      <input name="THRESHOLD" value="{{cfg['THRESHOLD']}}">
+    </label>
+
+    <h2>Systemd Timer</h2>
+    <label>OnUnitActiveSec:
+      <input name="TIMER" value="{{timer}}">
+    </label>
+
+    <button type="submit">Uložit změny</button>
+  </form>
+
+  <h2>Aktuální IP v blocklistu</h2>
+  <table>
+    <tr><th>#</th><th>IP</th></tr>
+    {% for ip in ips %}
+      <tr><td>{{loop.index}}</td><td>{{ip}}</td></tr>
+    {% endfor %}
+  </table>
+</body>
+</html>

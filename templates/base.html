@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>XIEM{% block title %}{% endblock %}</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0d0f14;
+      --surface:  #151820;
+      --border:   #252a35;
+      --accent:   #00d4aa;
+      --accent2:  #ff6b35;
+      --danger:   #ff3b5c;
+      --muted:    #5a6070;
+      --text:     #c8d0e0;
+      --text-hi:  #eef0f5;
+    }
+
+    body {
+      font-family: 'IBM Plex Sans', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+    }
+
+    nav {
+      width: 220px;
+      min-height: 100vh;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+
+    .nav-logo {
+      padding: 24px 20px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-logo .wordmark {
+      font-family: 'IBM Plex Mono', monospace;
+      font-weight: 600;
+      font-size: 20px;
+      color: var(--accent);
+      letter-spacing: 2px;
+    }
+
+    .nav-logo .sub {
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin-top: 2px;
+    }
+
+    nav ul {
+      list-style: none;
+      padding: 16px 0;
+      flex: 1;
+    }
+
+    nav ul li a {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 20px;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 500;
+      letter-spacing: 0.3px;
+      border-left: 2px solid transparent;
+      transition: color 0.15s, border-color 0.15s, background 0.15s;
+    }
+
+    nav ul li a:hover {
+      color: var(--text-hi);
+      background: rgba(255,255,255,0.03);
+    }
+
+    nav ul li a.active {
+      color: var(--accent);
+      border-left-color: var(--accent);
+      background: rgba(0, 212, 170, 0.06);
+    }
+
+    nav ul li a .icon {
+      font-size: 15px;
+      width: 18px;
+      text-align: center;
+    }
+
+    .nav-footer {
+      padding: 16px 20px;
+      border-top: 1px solid var(--border);
+      font-size: 11px;
+      color: var(--muted);
+      font-family: 'IBM Plex Mono', monospace;
+    }
+
+    main {
+      flex: 1;
+      padding: 32px 40px;
+      overflow-y: auto;
+    }
+
+    .page-header {
+      margin-bottom: 32px;
+    }
+
+    .page-header h1 {
+      font-size: 22px;
+      font-weight: 600;
+      color: var(--text-hi);
+      letter-spacing: -0.3px;
+    }
+
+    .page-header p {
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    .flash {
+      padding: 10px 16px;
+      border-radius: 4px;
+      font-size: 13px;
+      margin-bottom: 20px;
+      border-left: 3px solid;
+    }
+
+    .flash.ok {
+      background: rgba(0, 212, 170, 0.08);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .flash.error {
+      background: rgba(255, 59, 92, 0.08);
+      border-color: var(--danger);
+      color: var(--danger);
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+
+    .card-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 16px;
+    }
+
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 20px;
+    }
+
+    .stat-card .label {
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+
+    .stat-card .value {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 32px;
+      font-weight: 600;
+      color: var(--text-hi);
+      line-height: 1.1;
+      margin-top: 6px;
+    }
+
+    .stat-card .value.accent { color: var(--accent); }
+    .stat-card .value.warn   { color: var(--accent2); }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th {
+      text-align: left;
+      padding: 8px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid rgba(37,42,53,0.6);
+      color: var(--text);
+      vertical-align: middle;
+    }
+
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255,255,255,0.015); }
+
+    .mono { font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 3px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+
+    .badge-on  { background: rgba(0,212,170,0.12); color: var(--accent); }
+    .badge-off { background: rgba(90,96,112,0.2); color: var(--muted); }
+    .badge-warn{ background: rgba(255,107,53,0.12); color: var(--accent2); }
+    .badge-err { background: rgba(255,59,92,0.12); color: var(--danger); }
+    .badge-ip  { background: rgba(0,212,170,0.08); color: var(--accent); }
+    .badge-fqdn{ background: rgba(255,107,53,0.08); color: var(--accent2); }
+    .badge-url { background: rgba(90,96,112,0.15); color: var(--text); }
+
+    .form-row {
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+      flex-wrap: wrap;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .form-group label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+    }
+
+    input[type=text], input[type=url], input[type=number], select {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 8px 12px;
+      color: var(--text-hi);
+      font-family: 'IBM Plex Sans', sans-serif;
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.15s;
+      min-width: 120px;
+    }
+
+    input[type=text]:focus, input[type=url]:focus,
+    input[type=number]:focus, select:focus {
+      border-color: var(--accent);
+    }
+
+    select option { background: var(--surface); }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 600;
+      font-family: 'IBM Plex Sans', sans-serif;
+      cursor: pointer;
+      border: 1px solid transparent;
+      text-decoration: none;
+      transition: opacity 0.15s, background 0.15s;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #0d0f14;
+      border-color: var(--accent);
+    }
+
+    .btn-primary:hover { opacity: 0.85; }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--muted);
+      border-color: var(--border);
+    }
+
+    .btn-ghost:hover { color: var(--text-hi); border-color: var(--muted); }
+
+    .btn-danger {
+      background: transparent;
+      color: var(--danger);
+      border-color: rgba(255,59,92,0.3);
+    }
+
+    .btn-danger:hover { background: rgba(255,59,92,0.08); }
+
+    .btn-sm { padding: 5px 10px; font-size: 11px; }
+
+    form.inline { display: inline; }
+    form.inline button { background: none; border: none; padding: 0; cursor: pointer; }
+
+    .dot {
+      display: inline-block;
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      margin-right: 4px;
+    }
+    .dot-on  { background: var(--accent); box-shadow: 0 0 5px var(--accent); }
+    .dot-off { background: var(--muted); }
+
+    .truncate { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .section-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin: 4px 0 8px 20px;
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-logo">
+    <div class="wordmark">XIEM</div>
+    <div class="sub">X9 Intrusion Monitor</div>
+  </div>
+  <ul>
+    <li><a href="{{ url_for('dashboard') }}" class="{{ 'active' if request.endpoint == 'dashboard' }}">
+      <span class="icon">▦</span> Dashboard
+    </a></li>
+    <div class="section-label">Blocklists</div>
+    <li><a href="{{ url_for('feeds_list') }}" class="{{ 'active' if request.endpoint == 'feeds_list' }}">
+      <span class="icon">↓</span> Upstream Feeds
+    </a></li>
+    <li><a href="{{ url_for('manual_ips_list') }}" class="{{ 'active' if request.endpoint == 'manual_ips_list' }}">
+      <span class="icon">+</span> Manual IPs
+    </a></li>
+    <li><a href="{{ url_for('lists_list') }}" class="{{ 'active' if request.endpoint in ['lists_list', 'list_detail', 'list_source_auth_failures', 'list_source_eset_network'] }}">
+      <span class="icon">≡</span> Listy
+    </a></li>
+    <li><a href="{{ url_for('clients_list') }}" class="{{ 'active' if request.endpoint in ['clients_list', 'client_detail'] }}">
+      <span class="icon">◈</span> Klienti
+    </a></li>
+    <div class="section-label">Agenti</div>
+    <li><a href="{{ url_for('agents_list') }}" class="{{ 'active' if request.endpoint == 'agents_list' }}">
+      <span class="icon">◉</span> Agenti
+    </a></li>
+  </ul>
+  <div class="nav-footer">xiem.x9.cz</div>
+</nav>
+
+<main>
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+      <div class="flash {{ category }}">{{ message }}</div>
+    {% endfor %}
+  {% endwith %}
+
+  {% block content %}{% endblock %}
+</main>
+
+</body>
+</html>

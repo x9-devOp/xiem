@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %} — Upstream Feeds{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Upstream Feeds</h1>
+  <p>Externi blocklist feedy pro agregaci</p>
+</div>
+
+<div class="card">
+  <div class="card-title">Pridat feed</div>
+  <form method="POST" action="{{ url_for('feed_add') }}">
+    <div class="form-row">
+      <div class="form-group">
+        <label>Nazev</label>
+        <input type="text" name="nazev" placeholder="napr. Spamhaus DROP" required>
+      </div>
+      <div class="form-group" style="flex:1">
+        <label>URL</label>
+        <input type="url" name="url" placeholder="https://..." required style="min-width:300px">
+      </div>
+      <div class="form-group">
+        <label>Typ</label>
+        <select name="list_type">
+          <option value="ip">IP / CIDR</option>
+          <option value="fqdn">FQDN</option>
+          <option value="url">URL</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Poznamka</label>
+        <input type="text" name="poznamka" placeholder="volitelne">
+      </div>
+      <button type="submit" class="btn btn-primary">+ Pridat</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-title">Feedy ({{ feeds | length }})</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Nazev</th>
+        <th>URL</th>
+        <th>Typ</th>
+        <th>Zaznamu</th>
+        <th>Vaha</th>
+        <th>Doporuceno pro</th>
+        <th>Posledni refresh</th>
+        <th>Status</th>
+        <th>Akce</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for f in feeds %}
+      <tr>
+        <td>
+          <strong style="color:var(--text-hi)">{{ f.nazev }}</strong>
+          {% if f.poznamka %}<br><span style="font-size:11px;color:var(--muted)">{{ f.poznamka }}</span>{% endif %}
+        </td>
+        <td><span class="mono truncate" title="{{ f.url }}">{{ f.url }}</span></td>
+        <td><span class="badge badge-{{ f.list_type }}">{{ f.list_type }}</span></td>
+        <td class="mono" style="color:var(--accent)">{{ f.pocet_zaznamu or 0 }}</td>
+        <td>
+          <form class="inline" method="POST" action="{{ url_for('feed_vaha', feed_id=f.id) }}"
+                style="display:flex;align-items:center;gap:4px">
+            <input type="number" name="vaha" value="{{ f.vaha or 3.0 }}"
+                   min="0.1" max="10" step="0.1"
+                   style="width:60px;padding:4px 6px;font-size:12px">
+            <button class="btn btn-ghost btn-sm">✓</button>
+          </form>
+        </td>
+        <td>
+          <form class="inline" method="POST" action="{{ url_for('feed_doporuceno', feed_id=f.id) }}">
+            <select name="doporuceno" onchange="this.form.submit()"
+                    style="padding:4px 6px;font-size:12px">
+              <option value="inbound" {{ 'selected' if f.doporuceno == 'inbound' else '' }}>inbound</option>
+              <option value="both" {{ 'selected' if f.doporuceno == 'both' else '' }}>both</option>
+            </select>
+          </form>
+        </td>
+        <td class="mono">{{ f.posledni_refresh.strftime('%Y-%m-%d %H:%M') if f.posledni_refresh else '—' }}</td>
+        <td>
+          {% if f.enabled %}
+            <span class="badge badge-on">aktivni</span>
+          {% else %}
+            <span class="badge badge-off">vypnuto</span>
+          {% endif %}
+        </td>
+        <td>
+          <div style="display:flex;gap:6px">
+            <form class="inline" method="POST" action="{{ url_for('feed_refresh', feed_id=f.id) }}">
+              <button class="btn btn-ghost btn-sm">↻ Refresh</button>
+            </form>
+            <form class="inline" method="POST" action="{{ url_for('feed_toggle', feed_id=f.id) }}">
+              <button class="btn btn-ghost btn-sm">{{ '⏸ Vypnout' if f.enabled else '▶ Zapnout' }}</button>
+            </form>
+            <form class="inline" method="POST" action="{{ url_for('feed_delete', feed_id=f.id) }}"
+                  onsubmit="return confirm('Smazat feed a vsechny jeho zaznamy?')">
+              <button class="btn btn-danger btn-sm">✕ Smazat</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="9" style="color:var(--muted);text-align:center;padding:24px">Zadne feedy.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

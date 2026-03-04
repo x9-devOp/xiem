@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %} — Manual IPs{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Manual IPs / CIDR</h1>
+  <p>Rucne zadane IP adresy a site pro blokaci</p>
+</div>
+
+<div class="card">
+  <div class="card-title">Pridat zaznam</div>
+  <form method="POST" action="{{ url_for('manual_ip_add') }}">
+    <div class="form-row">
+      <div class="form-group">
+        <label>IP / CIDR</label>
+        <input type="text" name="ipadresa" placeholder="1.2.3.4 nebo 10.0.0.0/8" required>
+      </div>
+      <div class="form-group" style="flex:1">
+        <label>Poznamka</label>
+        <input type="text" name="poznamka" placeholder="proc je tato IP nebezpecna...">
+      </div>
+      <button type="submit" class="btn btn-primary">+ Pridat</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-title">Zaznamy ({{ ips | length }})</div>
+  <table>
+    <thead>
+      <tr>
+        <th>IP / CIDR</th>
+        <th>Poznamka</th>
+        <th>Pridano</th>
+        <th>Status</th>
+        <th>Akce</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for ip in ips %}
+      <tr>
+        <td class="mono" style="color:var(--text-hi)">{{ ip.ipadresa }}</td>
+        <td style="color:var(--muted);font-size:12px">{{ ip.poznamka or '—' }}</td>
+        <td class="mono">{{ ip.vytvoreno.strftime('%Y-%m-%d') }}</td>
+        <td>
+          {% if ip.enabled %}
+            <span class="badge badge-on">aktivni</span>
+          {% else %}
+            <span class="badge badge-off">vypnuto</span>
+          {% endif %}
+        </td>
+        <td>
+          <div style="display:flex;gap:6px">
+            <form class="inline" method="POST" action="{{ url_for('manual_ip_toggle', ip_id=ip.id) }}">
+              <button class="btn btn-ghost btn-sm">{{ '⏸ Vypnout' if ip.enabled else '▶ Zapnout' }}</button>
+            </form>
+            <form class="inline" method="POST" action="{{ url_for('manual_ip_delete', ip_id=ip.id) }}"
+                  onsubmit="return confirm('Smazat zaznam?')">
+              <button class="btn btn-danger btn-sm">✕ Smazat</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" style="color:var(--muted);text-align:center;padding:24px">Zadne zaznamy.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
