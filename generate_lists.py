@@ -2,16 +2,17 @@
 """
 XIEM blocklist generator
 Generuje vystupni soubory podle konfigurace output_lists + output_list_sources.
-Upstream feedy jsou zahrnuty pouze pokud jsou explicitne pridany jako zdroj listu.
+Vahy a parametry decay se ctou z output_list_sources.parametry (JSONB).
 
 Umisteni: /usr/local/bin/generate_lists.py
 Spousteni: systemd timer generate-lists.timer (kazdou minutu)
 """
 
+import math
 import os
+import re
 import sys
 import logging
-import re
 from datetime import datetime
 from contextlib import contextmanager
 
@@ -21,7 +22,7 @@ import requests
 import netaddr
 
 # ------------------------------------------------------------
-# Config
+# Global defaults (pouziji se pokud parametry v DB nejsou nastaveny)
 # ------------------------------------------------------------
 
 DB_DSN = os.environ.get(
@@ -31,13 +32,12 @@ DB_DSN = os.environ.get(
 
 OUTPUT_DIR = "/var/www/html/IP_LISTS"
 
-DECAY_LAMBDA     = 0.05
-THRESHOLD        = 3.0
-SUBNET24_MIN_IPS = 3
-
-WEIGHT_ESET   = 1.5
-WEIGHT_AUTH   = 0.5
-WEIGHT_MANUAL = 10.0
+DEFAULT_THRESHOLD    = 3.0
+DEFAULT_DECAY_LAMBDA = 0.05
+DEFAULT_WINDOW_DAYS  = 120
+DEFAULT_WEIGHT       = 1.0
+SUBNET24_MIN_IPS     = 3
+WEIGHT_MANUAL        = 10.0
 
 FEED_TIMEOUT_SEC = 30
 FEED_MAX_BYTES   = 10 * 1024 * 1024
@@ -70,9 +70,8 @@ def get_db():
 # Helpers
 # ------------------------------------------------------------
 
-def decay(age_days: float) -> float:
-    import math
-    return math.exp(-DECAY_LAMBDA * age_days)
+def decay(age_days: float, lam: float) -> float:
+    return math.exp(-lam * max(age_days, 0.0))
 
 
 def is_valid_ip(ip: str) -> bool:
@@ -98,6 +97,7 @@ def parse_ip_from_line(line: str) -> str | None:
     line = re.split(r"[\s;#]", line)[0].strip()
     if not line:
         return None
+    # DShield format: "1.2.3.0\t24\t..."
     parts = line.split("\t")
     if len(parts) >= 2 and parts[1].isdigit():
         cidr = f"{parts[0]}/{parts[1]}"
@@ -107,12 +107,21 @@ def parse_ip_from_line(line: str) -> str | None:
         return line
     return None
 
+
+def get_param(parametry: dict, key: str, default):
+    val = parametry.get(key)
+    if val is None:
+        return default
+    try:
+        return type(default)(val)
+    except Exception:
+        return default
+
 # ------------------------------------------------------------
 # Upstream feed refresh
 # ------------------------------------------------------------
 
 def refresh_stale_feeds():
-    """Refreshne feedy ktere jsou stare > 55 minut."""
     with get_db() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
@@ -173,83 +182,89 @@ def _refresh_feed(feed_id: int, nazev: str, url: str):
 # Scoring per list
 # ------------------------------------------------------------
 
-def compute_scores_for_list(conn, sources: list) -> dict[str, float]:
+def compute_scores_for_list(conn, sources: list, threshold: float) -> dict[str, float]:
     """
-    Vypocita skore IP pouze ze zdrojů ktere jsou nakonfigurovany pro dany list.
-    sources = list of dicts {source_type, source_id}
+    Vypocita skore IP ze zdrojů nakonfigurovanych pro dany list.
+    Parametry (vaha, decay_lambda, window_days) se ctou z output_list_sources.parametry.
+    sources = list of dicts {source_type, source_id, parametry}
     """
     scores: dict[str, float] = {}
 
-    source_types = {s["source_type"] for s in sources}
-    feed_ids     = [s["source_id"] for s in sources if s["source_type"] == "upstream_feed" and s["source_id"]]
-
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
 
-        if "eset_network" in source_types:
-            cur.execute("""
-                SELECT ipadresa,
-                       EXTRACT(EPOCH FROM (now() - cas_udalosti))/86400 AS age_days
-                FROM eset_network_blocks
-                WHERE cas_udalosti > now() - interval '120 days'
-            """)
-            for row in cur.fetchall():
-                ip = row["ipadresa"]
-                if not is_valid_ip(ip):
-                    continue
-                scores[ip] = scores.get(ip, 0.0) + WEIGHT_ESET * decay(float(row["age_days"]))
+        for src in sources:
+            stype  = src["source_type"]
+            params = src["parametry"] or {}
+            vaha   = get_param(params, "vaha",         DEFAULT_WEIGHT)
+            lam    = get_param(params, "decay_lambda",  DEFAULT_DECAY_LAMBDA)
+            window = get_param(params, "window_days",   DEFAULT_WINDOW_DAYS)
 
-        if "auth_failures" in source_types:
-            cur.execute("""
-                SELECT ipadresa,
-                       EXTRACT(EPOCH FROM (now() - (datum + cas)::timestamp))/86400 AS age_days
-                FROM auth_failures
-                WHERE datum IS NOT NULL AND cas IS NOT NULL
-                  AND datum > now()::date - interval '120 days'
-            """)
-            for row in cur.fetchall():
-                ip = row["ipadresa"]
-                if not is_valid_ip(ip):
-                    continue
-                scores[ip] = scores.get(ip, 0.0) + WEIGHT_AUTH * decay(float(row["age_days"]))
+            if stype == "eset_network":
+                cur.execute("""
+                    SELECT ipadresa,
+                           EXTRACT(EPOCH FROM (now() - cas_udalosti))/86400 AS age_days
+                    FROM eset_network_blocks
+                    WHERE cas_udalosti > now() - interval '%s days'
+                """ % int(window))
+                for row in cur.fetchall():
+                    ip = row["ipadresa"]
+                    if not is_valid_ip(ip):
+                        continue
+                    scores[ip] = scores.get(ip, 0.0) + vaha * decay(float(row["age_days"]), lam)
 
-        if feed_ids:
-            placeholders = ",".join(["%s"] * len(feed_ids))
-            cur.execute(f"""
-                SELECT e.zaznam, f.vaha,
-                       EXTRACT(EPOCH FROM (now() - e.importtime))/86400 AS age_days
-                FROM upstream_feed_entries e
-                JOIN upstream_feeds f ON f.id = e.feed_id
-                WHERE f.enabled = true
-                  AND f.list_type = 'ip'
-                  AND f.id IN ({placeholders})
-            """, feed_ids)
-            for row in cur.fetchall():
-                zaznam    = row["zaznam"]
-                vaha      = float(row["vaha"] or 3.0)
-                score_add = vaha * decay(float(row["age_days"]))
-                try:
-                    net = netaddr.IPNetwork(zaznam, implicit_prefix=False)
-                    if net.prefixlen >= 24:
-                        for ip in net:
-                            ip_str = str(ip)
-                            scores[ip_str] = scores.get(ip_str, 0.0) + score_add
-                    else:
-                        cidr_key = str(net.cidr)
-                        scores[cidr_key] = scores.get(cidr_key, 0.0) + score_add
-                except Exception:
-                    if is_valid_ip(zaznam):
-                        scores[zaznam] = scores.get(zaznam, 0.0) + score_add
+            elif stype == "auth_failures":
+                cur.execute("""
+                    SELECT ipadresa,
+                           EXTRACT(EPOCH FROM (now() - (datum + cas)::timestamp))/86400 AS age_days
+                    FROM auth_failures
+                    WHERE datum IS NOT NULL AND cas IS NOT NULL
+                      AND datum > now()::date - interval '%s days'
+                """ % int(window))
+                for row in cur.fetchall():
+                    ip = row["ipadresa"]
+                    if not is_valid_ip(ip):
+                        continue
+                    scores[ip] = scores.get(ip, 0.0) + vaha * decay(float(row["age_days"]), lam)
 
-        if "manual" in source_types:
-            cur.execute("""
-                SELECT zaznam FROM manual_ips
-                WHERE enabled = true AND typ = 'block' AND list_type = 'ip'
-            """)
-            for row in cur.fetchall():
-                zaznam = row["zaznam"]
-                scores[zaznam] = scores.get(zaznam, 0.0) + WEIGHT_MANUAL
+            elif stype == "upstream_feed" and src["source_id"]:
+                feed_id = src["source_id"]
+                cur.execute("""
+                    SELECT e.zaznam, f.vaha AS feed_vaha,
+                           EXTRACT(EPOCH FROM (now() - e.importtime))/86400 AS age_days
+                    FROM upstream_feed_entries e
+                    JOIN upstream_feeds f ON f.id = e.feed_id
+                    WHERE f.enabled = true
+                      AND f.list_type = 'ip'
+                      AND f.id = %s
+                """, (feed_id,))
+                for row in cur.fetchall():
+                    zaznam    = row["zaznam"]
+                    # vaha z output_list_sources.parametry ma prednost pred upstream_feeds.vaha
+                    eff_vaha  = vaha if "vaha" in params else float(row["feed_vaha"] or DEFAULT_WEIGHT)
+                    score_add = eff_vaha * decay(float(row["age_days"]), lam)
+                    try:
+                        net = netaddr.IPNetwork(zaznam, implicit_prefix=False)
+                        if net.prefixlen >= 24:
+                            for ip in net:
+                                ip_str = str(ip)
+                                scores[ip_str] = scores.get(ip_str, 0.0) + score_add
+                        else:
+                            cidr_key = str(net.cidr)
+                            scores[cidr_key] = scores.get(cidr_key, 0.0) + score_add
+                    except Exception:
+                        if is_valid_ip(zaznam):
+                            scores[zaznam] = scores.get(zaznam, 0.0) + score_add
 
-    return {ip: s for ip, s in scores.items() if s >= THRESHOLD}
+            elif stype == "manual":
+                cur.execute("""
+                    SELECT zaznam FROM manual_ips
+                    WHERE enabled = true AND typ = 'block' AND list_type = 'ip'
+                """)
+                for row in cur.fetchall():
+                    zaznam = row["zaznam"]
+                    scores[zaznam] = scores.get(zaznam, 0.0) + WEIGHT_MANUAL
+
+    return {ip: s for ip, s in scores.items() if s >= threshold}
 
 
 def compute_excludes(conn) -> netaddr.IPSet:
@@ -317,7 +332,7 @@ def aggregate_to_blocklist(scored: dict[str, float], excludes: netaddr.IPSet) ->
 # Output
 # ------------------------------------------------------------
 
-def write_output(filename: str, entries: list[str], source_desc: str):
+def write_output(filename: str, entries: list[str], source_desc: str, threshold: float):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     path     = os.path.join(OUTPUT_DIR, filename)
     now      = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -325,7 +340,7 @@ def write_output(filename: str, entries: list[str], source_desc: str):
         f"# XIEM blocklist - {source_desc}",
         f"# Generated: {now}",
         f"# Entries: {len(entries)}",
-        f"# Threshold: {THRESHOLD}, decay lambda: {DECAY_LAMBDA}",
+        f"# Threshold: {threshold}",
         "",
     ] + entries + [""]
     tmp_path = path + ".tmp"
@@ -341,13 +356,11 @@ def write_output(filename: str, entries: list[str], source_desc: str):
 def main():
     log.info("XIEM generate_lists.py starting")
 
-    # 1. Refresh stale upstream feeds (vždy, nezavisle na listech)
     try:
         refresh_stale_feeds()
     except Exception as e:
         log.error("Feed refresh error: %s", e)
 
-    # 2. Nacti vsechny enabled output listy
     with get_db() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
@@ -362,7 +375,6 @@ def main():
         log.warning("No enabled output lists found, nothing to generate")
         return
 
-    # 3. Pro kazdy list vygeneruj soubor
     for lst in lists:
         list_id   = lst["id"]
         list_name = lst["nazev"]
@@ -372,7 +384,7 @@ def main():
             with get_db() as conn:
                 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                     cur.execute("""
-                        SELECT source_type, source_id
+                        SELECT source_type, source_id, parametry
                         FROM output_list_sources
                         WHERE list_id = %s AND enabled = true
                     """, (list_id,))
@@ -380,14 +392,25 @@ def main():
 
             if not sources:
                 log.warning("List %s has no enabled sources, writing empty file", list_name)
-                write_output(f"{list_name}.txt", [], f"{list_name} - no sources")
+                write_output(f"{list_name}.txt", [], f"{list_name} - no sources", DEFAULT_THRESHOLD)
                 continue
 
+            # threshold lze nastavit per-list pres parametry prvniho zdroje (nebo pouzit default)
+            threshold = DEFAULT_THRESHOLD
+            for src in sources:
+                t = (src["parametry"] or {}).get("threshold_override")
+                if t is not None:
+                    try:
+                        threshold = float(t)
+                    except Exception:
+                        pass
+                    break
+
             source_desc = ", ".join(sorted({s["source_type"] for s in sources}))
-            log.info("List %s sources: %s", list_name, source_desc)
+            log.info("List %s sources: %s (threshold=%.1f)", list_name, source_desc, threshold)
 
             with get_db() as conn:
-                scored   = compute_scores_for_list(conn, sources)
+                scored   = compute_scores_for_list(conn, sources, threshold)
                 excludes = compute_excludes(conn)
 
             log.info("List %s: %d IPs above threshold", list_name, len(scored))
@@ -399,7 +422,7 @@ def main():
                      sum(1 for e in blocklist if e.endswith("/32")),
                      sum(1 for e in blocklist if not e.endswith("/32")))
 
-            write_output(f"{list_name}.txt", blocklist, source_desc)
+            write_output(f"{list_name}.txt", blocklist, source_desc, threshold)
 
         except Exception as e:
             log.error("List %s generation failed: %s", list_name, e)
