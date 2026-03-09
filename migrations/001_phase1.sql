@@ -58,3 +58,7 @@ ALTER TABLE output_lists
 
 -- remove whitelist_entries (replaced by regular output lists)
 DROP TABLE IF EXISTS whitelist_entries;
+
+-- grant permissions on new tables to app user
+GRANT SELECT, INSERT, UPDATE, DELETE ON client_ips, agent_commands, agent_events TO xiem_writer;
+GRANT USAGE, SELECT ON SEQUENCE client_ips_id_seq, agent_commands_id_seq, agent_events_id_seq TO xiem_writer;
