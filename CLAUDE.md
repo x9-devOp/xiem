@@ -85,5 +85,9 @@ psql "$(sudo grep XIEM_DB_DSN /etc/xiem/env | cut -d= -f2-)" -c 'SELECT 1;'
 ## Roadmap - co je dal (C5)
 - Analyze sekce: /analyze/lookup (proc je IP v blocklistu?) + /analyze/top-offenders
 - Per-source scoring parametry editovatelne pres GUI (output_list_sources.parametry JSONB)
-- Zprisneni pg_hba.conf (aktualne trust 0.0.0.0/0)
 - Agent re-registrace: OPRAVENO (uq_agents_hostname_group constraint + ON CONFLICT fix)
+
+## Bezpecnost DB (aktualni stav)
+- pg_hba.conf: pouze localhost (127.0.0.1/32 scram-sha-256), zadny externi pristup
+- listen_addresses = localhost (port 5432 nenaslouchá navenek)
+- DSN s heslem: /etc/systemd/system/xiem-api.service + /etc/xiem/env (oba mimo git)
