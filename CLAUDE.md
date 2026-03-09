@@ -8,7 +8,7 @@ Sbira nebezpecne IP z vice zdroju, generuje blocklisty pro pfBlocker na pfSense 
 - **Backend:** Flask + PostgreSQL 14 + gunicorn + systemd (Ubuntu 22.04)
 - **Agent:** C# .NET 8 Windows Service (na klientskych Windows strojich)
 - **Web:** Nginx (reverse proxy + static /IP_LISTS/)
-- **DB user:** xiem_writer, DSN v /etc/xiem/env a v systemd unit
+- **DB user:** xiem_writer, DSN v /etc/systemd/system/xiem-api.service (Environment=) a /etc/xiem/env (pro generate_lists.py)
 
 ## Git workflow
 - Repo: https://github.com/x9-devOp/xiem
@@ -47,6 +47,7 @@ output_lists           - definice vystupnich souboru
 output_list_sources    - zdroje pro kazdy list (parametry v JSONB)
 clients                - klienti MSP
 whitelist_entries      - per-klient whitelisty
+script_logs            - legacy logovaci tabulka (stare PS/direct-DB agenty, neni aktivne pouzivana)
 ```
 
 ## Aktivni bugy
@@ -78,7 +79,7 @@ sudo journalctl -u generate-lists.service -n 20 --no-pager
 
 ## DB pripojeni (test)
 ```bash
-sudo -u www-data psql "$(grep XIEM_DB_DSN /etc/xiem/env | cut -d= -f2-)" -c 'SELECT 1;'
+psql "$(sudo grep XIEM_DB_DSN /etc/xiem/env | cut -d= -f2-)" -c 'SELECT 1;'
 ```
 
 ## Roadmap - co je dal (C5)
