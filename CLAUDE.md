@@ -49,16 +49,8 @@ clients                - klienti MSP
 whitelist_entries      - per-klient whitelisty
 ```
 
-## Aktivni bugy (opravit jako prvni)
-1. **KRITICKA:** `upstream_feeds` chybi sloupec `vaha` -> `generate_lists.py` pada
-   ```sql
-   ALTER TABLE upstream_feeds ADD COLUMN vaha NUMERIC DEFAULT 3.0;
-   ```
-2. **VYSOKA:** `agents` upsert broken - ON CONFLICT na token misto hostname+group -> duplicity
-   ```sql
-   ALTER TABLE agents ADD CONSTRAINT uq_agents_hostname_group UNIQUE (hostname, group_id);
-   ```
-   A opravit SQL v app.py `agent_register()` na `ON CONFLICT (hostname, group_id) DO UPDATE`.
+## Aktivni bugy
+Zadne zname aktivni bugy.
 
 ## Pravidla pro tento projekt
 - Komentare v kodu: anglicky, bez diakritiky
@@ -93,4 +85,4 @@ sudo -u www-data psql "$(grep XIEM_DB_DSN /etc/xiem/env | cut -d= -f2-)" -c 'SEL
 - Analyze sekce: /analyze/lookup (proc je IP v blocklistu?) + /analyze/top-offenders
 - Per-source scoring parametry editovatelne pres GUI (output_list_sources.parametry JSONB)
 - Zprisneni pg_hba.conf (aktualne trust 0.0.0.0/0)
-- Agent re-registrace bug fix (viz Aktivni bugy #2)
+- Agent re-registrace: OPRAVENO (uq_agents_hostname_group constraint + ON CONFLICT fix)
