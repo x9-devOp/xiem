@@ -367,6 +367,41 @@ def download_agent():
     )
 
 
+@app.route("/admin/agent-binary", methods=["GET"])
+def admin_agent_binary():
+    info = None
+    if os.path.isfile(AGENT_BINARY_PATH):
+        st = os.stat(AGENT_BINARY_PATH)
+        info = {
+            "size":     st.st_size,
+            "modified": datetime.utcfromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M UTC"),
+            "path":     AGENT_BINARY_PATH,
+        }
+    return render_template("admin_binary.html", info=info)
+
+
+@app.route("/admin/agent-binary/upload", methods=["POST"])
+def admin_agent_binary_upload():
+    f = request.files.get("binary")
+    if not f or not f.filename:
+        flash("Vyberte soubor.", "error")
+        return redirect(url_for("admin_agent_binary"))
+    if not f.filename.lower().endswith(".exe"):
+        flash("Soubor musi mit priponu .exe", "error")
+        return redirect(url_for("admin_agent_binary"))
+
+    os.makedirs(os.path.dirname(AGENT_BINARY_PATH), exist_ok=True)
+    tmp = AGENT_BINARY_PATH + ".tmp"
+    try:
+        f.save(tmp)
+        os.replace(tmp, AGENT_BINARY_PATH)
+        st = os.stat(AGENT_BINARY_PATH)
+        flash(f"Binary nahrana ({st.st_size:,} B). Odeslej 'update' prikaz agentum.", "ok")
+    except Exception as e:
+        flash(f"Chyba pri uploadu: {e}", "error")
+    return redirect(url_for("admin_agent_binary"))
+
+
 @app.route("/api/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"}), 200
@@ -1226,12 +1261,14 @@ def commands_list():
 @app.route("/commands/add", methods=["POST"])
 def command_add():
     command_type = request.form.get("command_type", "powershell")
-    if command_type not in ("powershell", "cmd", "panic"):
+    if command_type not in ("powershell", "cmd", "panic", "update"):
         flash("Neplatny typ prikazu.", "error")
         return redirect(url_for("commands_list"))
 
     # Build payload based on command type
-    if command_type == "panic":
+    if command_type == "update":
+        payload = {}
+    elif command_type == "panic":
         script         = request.form.get("script", "").strip()
         retry_interval = request.form.get("retry_interval", "5m").strip()
         timeout        = request.form.get("timeout", "2h").strip()

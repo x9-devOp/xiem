@@ -85,8 +85,7 @@ public class CommandPoller
                 result = new CommandResult { CommandId = cmd.Id, Output = "panic command cached", ExitCode = 0 };
                 break;
             case "update":
-                _log.LogWarning("Command {Id}: update not yet implemented (Phase 6)", cmd.Id);
-                result = new CommandResult { CommandId = cmd.Id, Output = "update: not implemented", ExitCode = -1 };
+                result = await RunUpdateAsync(cmd, ct);
                 break;
             default:
                 _log.LogWarning("Command {Id}: unknown type {Type}", cmd.Id, cmd.CommandType);
@@ -170,6 +169,75 @@ public class CommandPoller
             _log.LogError(ex, "Command {Id} execution failed", cmdId);
             return new CommandResult { CommandId = cmdId, Error = ex.Message, ExitCode = -1 };
         }
+    }
+
+    private async Task<CommandResult> RunUpdateAsync(AgentCommand cmd, CancellationToken ct)
+    {
+        var currentExe = Environment.ProcessPath;
+        if (string.IsNullOrEmpty(currentExe))
+            return new CommandResult { CommandId = cmd.Id, Error = "Cannot determine executable path", ExitCode = -1 };
+
+        var tempExe    = currentExe + ".new";
+        var scriptPath = Path.Combine(Path.GetTempPath(), "xiem_update.ps1");
+        var errorLog   = Path.Combine(Path.GetTempPath(), "xiem_update_error.txt");
+
+        _log.LogInformation("Update {Id}: downloading new binary", cmd.Id);
+        var bytes = await _api.DownloadBinaryAsync("/api/download/agent", ct);
+        if (bytes == null || bytes.Length == 0)
+            return new CommandResult { CommandId = cmd.Id, Error = "Failed to download new binary", ExitCode = -1 };
+
+        try { await File.WriteAllBytesAsync(tempExe, bytes, ct); }
+        catch (Exception ex)
+        {
+            return new CommandResult { CommandId = cmd.Id, Error = $"Failed to save binary: {ex.Message}", ExitCode = -1 };
+        }
+
+        // Updater runs detached: waits 3s (so result gets posted), stops service,
+        // replaces binary, starts service.
+        var script = $"""
+            Start-Sleep -Seconds 3
+            try {{
+                Stop-Service -Name 'XiemAgent' -Force -ErrorAction Stop
+                Start-Sleep -Seconds 2
+                Copy-Item -Path '{tempExe}' -Destination '{currentExe}' -Force
+                Remove-Item -Path '{tempExe}' -ErrorAction SilentlyContinue
+                Start-Service -Name 'XiemAgent'
+            }} catch {{
+                $_ | Out-File -FilePath '{errorLog}' -Force
+            }}
+            Remove-Item -Path '{scriptPath}' -ErrorAction SilentlyContinue
+            """;
+
+        try { await File.WriteAllTextAsync(scriptPath, script, ct); }
+        catch (Exception ex)
+        {
+            return new CommandResult { CommandId = cmd.Id, Error = $"Failed to write updater script: {ex.Message}", ExitCode = -1 };
+        }
+
+        // UseShellExecute=true creates a detached process that survives service stop
+        var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes($"& '{scriptPath}'"));
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName        = "powershell.exe",
+                Arguments       = $"-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand {encoded}",
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            return new CommandResult { CommandId = cmd.Id, Error = $"Failed to launch updater: {ex.Message}", ExitCode = -1 };
+        }
+
+        _log.LogInformation("Update {Id}: updater launched ({Bytes} B), service restarts in ~5s",
+            cmd.Id, bytes.Length);
+        return new CommandResult
+        {
+            CommandId = cmd.Id,
+            Output    = $"Update initiated. Binary: {bytes.Length:N0} B. Service restarting in ~5s.",
+            ExitCode  = 0
+        };
     }
 
     private static string? GetScript(AgentCommand cmd) =>

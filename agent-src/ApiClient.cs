@@ -138,6 +138,22 @@ public class ApiClient
         }
     }
 
+    public async Task<byte[]?> DownloadBinaryAsync(string path, CancellationToken ct)
+    {
+        SetToken();
+        try
+        {
+            var bytes = await _http.GetByteArrayAsync(path, ct);
+            LastContact = DateTime.UtcNow;
+            return bytes;
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to download binary from {Path}", path);
+            return null;
+        }
+    }
+
     public async Task PostCommandResultAsync(CommandResult result, CancellationToken ct)
     {
         SetToken();

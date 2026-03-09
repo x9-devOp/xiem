@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %} — Agent binary{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Agent binary</h1>
+  <p>Sprava distribucniho souboru xiem-agent.exe</p>
+</div>
+
+<div class="card">
+  <div class="card-title">Aktualni binary</div>
+  {% if info %}
+  <table style="font-size:13px;margin-bottom:20px">
+    <tr><td style="color:var(--muted);width:140px;padding:6px 12px">Cesta</td>
+        <td class="mono">{{ info.path }}</td></tr>
+    <tr><td style="color:var(--muted);padding:6px 12px">Velikost</td>
+        <td class="mono">{{ "{:,}".format(info.size) }} B</td></tr>
+    <tr><td style="color:var(--muted);padding:6px 12px">Zmeneno</td>
+        <td class="mono">{{ info.modified }}</td></tr>
+  </table>
+  {% else %}
+  <p style="color:var(--danger);font-size:13px;margin-bottom:16px">
+    Binary nenalezena na {{ config.AGENT_BINARY_PATH or '/var/www/flask_xiem/agent/xiem-agent.exe' }}
+  </p>
+  {% endif %}
+
+  <form method="POST" action="{{ url_for('admin_agent_binary_upload') }}"
+        enctype="multipart/form-data">
+    <div class="form-row">
+      <div class="form-group">
+        <label>Nahrat novou verzi (.exe)</label>
+        <input type="file" name="binary" accept=".exe" required
+               style="padding:6px 12px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text-hi);font-size:13px">
+      </div>
+      <div style="display:flex;align-items:flex-end">
+        <button type="submit" class="btn btn-primary">&#8593; Nahrat</button>
+      </div>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-title">Postup aktualizace agentu</div>
+  <ol style="color:var(--text);font-size:13px;line-height:2;padding-left:20px">
+    <li>Nahraj novou binary pres formular vyse (atomicka nahrada)</li>
+    <li>Jdi do <a href="{{ url_for('commands_list') }}" style="color:var(--accent)">Prikazy</a></li>
+    <li>Zvol typ <strong>update</strong>, vyber cil (agent / skupina / klient / vsichni)</li>
+    <li>Odeslat — agent stahne binary, po 3s restartuje service</li>
+    <li>Zkontroluj verzi agenta v <a href="{{ url_for('agents_list') }}" style="color:var(--accent)">Agenti</a></li>
+  </ol>
+</div>
+{% endblock %}

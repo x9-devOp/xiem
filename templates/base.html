@@ -385,6 +385,10 @@
     <li><a href="{{ url_for('lists_list') }}" class="{{ 'active' if request.endpoint in ['lists_list', 'list_detail', 'list_source_auth_failures', 'list_source_eset_network'] }}">
       <span class="icon">≡</span> Listy
     </a></li>
+    <div class="section-label">Admin</div>
+    <li><a href="{{ url_for('admin_agent_binary') }}" class="{{ 'active' if request.endpoint == 'admin_agent_binary' }}">
+      <span class="icon">&#8593;</span> Agent binary
+    </a></li>
     <div class="section-label">Analyza</div>
     <li><a href="{{ url_for('analyze') }}" class="{{ 'active' if request.endpoint == 'analyze' }}">
       <span class="icon">◎</span> Analyza

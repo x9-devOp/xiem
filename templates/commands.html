@@ -16,6 +16,7 @@
         <select name="command_type" id="cmd-type" onchange="updateCmdType()">
           <option value="powershell">PowerShell</option>
           <option value="cmd">CMD</option>
+          <option value="update">&#8593; Update agenta</option>
           <option value="panic" style="color:#ff3b5c">&#9888; PANIC</option>
         </select>
       </div>
@@ -83,6 +84,10 @@
       <div style="display:flex;align-items:flex-end">
         <button type="submit" id="submit-btn" class="btn btn-primary">&#9654; Odeslat</button>
       </div>
+    </div>
+    <div id="update-info" style="display:none;margin-top:10px;padding:10px 14px;background:rgba(0,212,170,0.06);border:1px solid rgba(0,212,170,0.2);border-radius:4px;font-size:12px;color:var(--accent)">
+      &#8593; Agent stahne aktualni binary z /api/download/agent a restartuje service (~5s).
+      <a href="{{ url_for('admin_agent_binary') }}" style="color:var(--accent);margin-left:8px">Spravovat binary ↗</a>
     </div>
     <div id="panic-warning" style="display:none;margin-top:10px;padding:10px 14px;background:rgba(255,59,92,0.08);border:1px solid rgba(255,59,92,0.3);border-radius:4px;font-size:12px;color:var(--danger)">
       &#9888; PANIC command bude podepsan a distribuovan. Agent ho spusti po disconnectu delsi nez <strong>timeout</strong>. Akce je nevratna.
@@ -181,13 +186,19 @@ function updateTarget() {
   document.getElementById('tgt-client').style.display = (t === 'client') ? 'flex' : 'none';
 }
 function updateCmdType() {
-  var isPanic = document.getElementById('cmd-type').value === 'panic';
-  document.getElementById('panic-fields').style.display  = isPanic ? 'flex' : 'none';
-  document.getElementById('panic-warning').style.display = isPanic ? 'block' : 'none';
-  document.getElementById('submit-btn').textContent = isPanic ? '⚠ Odeslat PANIC' : '▶ Odeslat';
-  document.getElementById('submit-btn').style.background = isPanic ? 'var(--danger)' : '';
+  var t = document.getElementById('cmd-type').value;
+  var isPanic  = t === 'panic';
+  var isUpdate = t === 'update';
+  var isScript = t === 'powershell' || t === 'cmd';
+  document.getElementById('panic-fields').style.display  = isPanic  ? 'flex'  : 'none';
+  document.getElementById('panic-warning').style.display = isPanic  ? 'block' : 'none';
+  document.getElementById('update-info').style.display   = isUpdate ? 'block' : 'none';
+  // hide script area for update
+  document.querySelector('textarea[name=script]').closest('.form-group').style.display = isUpdate ? 'none' : 'flex';
+  document.getElementById('submit-btn').textContent   = isPanic ? '⚠ Odeslat PANIC' : isUpdate ? '↑ Odeslat UPDATE' : '▶ Odeslat';
+  document.getElementById('submit-btn').style.background  = isPanic ? 'var(--danger)' : '';
   document.getElementById('submit-btn').style.borderColor = isPanic ? 'var(--danger)' : '';
-  document.getElementById('submit-btn').style.color = isPanic ? '#fff' : '';
+  document.getElementById('submit-btn').style.color       = isPanic ? '#fff' : '';
 }
 updateTarget();
 updateCmdType();
