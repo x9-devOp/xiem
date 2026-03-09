@@ -4,23 +4,28 @@ using System.Text;
 namespace XiemAgent;
 
 /// <summary>
-/// Polls /api/agent/commands every 30 seconds, executes powershell/cmd commands,
-/// posts results back. Panic and update commands are handled in later phases.
+/// Polls /api/agent/commands every 30 seconds.
+/// All commands are RSA-PSS verified before execution.
+/// panic -> handed to PanicWatchdog (not executed directly).
+/// update -> stubbed until Phase 6.
 /// </summary>
 public class CommandPoller
 {
     private readonly ILogger<CommandPoller> _log;
     private readonly ApiClient _api;
-    private readonly IConfiguration _config;
+    private readonly SignatureVerifier _verifier;
+    private readonly PanicWatchdog _watchdog;
 
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(30);
     private const int DefaultTimeoutSec = 60;
 
-    public CommandPoller(ILogger<CommandPoller> log, ApiClient api, IConfiguration config)
+    public CommandPoller(ILogger<CommandPoller> log, ApiClient api,
+                         SignatureVerifier verifier, PanicWatchdog watchdog)
     {
-        _log = log;
-        _api = api;
-        _config = config;
+        _log      = log;
+        _api      = api;
+        _verifier = verifier;
+        _watchdog = watchdog;
     }
 
     public async Task RunAsync(CancellationToken ct)
@@ -35,7 +40,7 @@ public class CommandPoller
                 foreach (var cmd in commands)
                 {
                     if (ct.IsCancellationRequested) break;
-                    await ExecuteCommandAsync(cmd, ct);
+                    await HandleCommandAsync(cmd, ct);
                 }
             }
             catch (OperationCanceledException) { break; }
@@ -51,9 +56,20 @@ public class CommandPoller
         _log.LogInformation("CommandPoller stopped");
     }
 
-    private async Task ExecuteCommandAsync(AgentCommand cmd, CancellationToken ct)
+    private async Task HandleCommandAsync(AgentCommand cmd, CancellationToken ct)
     {
-        _log.LogInformation("Executing command {Id} type={Type}", cmd.Id, cmd.CommandType);
+        // Verify signature before doing anything else
+        if (!_verifier.Verify(cmd.Id, cmd.CommandType, cmd.Payload, cmd.Signature))
+        {
+            _log.LogWarning("Command {Id} rejected: invalid or missing signature", cmd.Id);
+            await _api.PostCommandResultAsync(new CommandResult
+            {
+                CommandId = cmd.Id, ExitCode = -1, Error = "signature verification failed"
+            }, ct);
+            return;
+        }
+
+        _log.LogInformation("Command {Id} type={Type} — signature OK", cmd.Id, cmd.CommandType);
 
         CommandResult result;
         switch (cmd.CommandType)
@@ -64,17 +80,17 @@ public class CommandPoller
             case "cmd":
                 result = await RunCmdAsync(cmd, ct);
                 break;
+            case "panic":
+                _watchdog.Set(cmd);
+                result = new CommandResult { CommandId = cmd.Id, Output = "panic command cached", ExitCode = 0 };
+                break;
             case "update":
                 _log.LogWarning("Command {Id}: update not yet implemented (Phase 6)", cmd.Id);
                 result = new CommandResult { CommandId = cmd.Id, Output = "update: not implemented", ExitCode = -1 };
                 break;
-            case "panic":
-                _log.LogWarning("Command {Id}: panic not yet implemented (Phase 4)", cmd.Id);
-                result = new CommandResult { CommandId = cmd.Id, Output = "panic: not implemented", ExitCode = -1 };
-                break;
             default:
                 _log.LogWarning("Command {Id}: unknown type {Type}", cmd.Id, cmd.CommandType);
-                result = new CommandResult { CommandId = cmd.Id, Output = $"unknown command type: {cmd.CommandType}", ExitCode = -1 };
+                result = new CommandResult { CommandId = cmd.Id, Error = $"unknown command type: {cmd.CommandType}", ExitCode = -1 };
                 break;
         }
 
@@ -87,12 +103,10 @@ public class CommandPoller
         if (script == null)
             return new CommandResult { CommandId = cmd.Id, Error = "missing script in payload", ExitCode = -1 };
 
-        var timeoutSec = GetTimeout(cmd);
         var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
-
         return await RunProcessAsync(cmd.Id, "powershell.exe",
             $"-NoProfile -NonInteractive -EncodedCommand {encoded}",
-            timeoutSec, ct);
+            GetTimeout(cmd), ct);
     }
 
     private async Task<CommandResult> RunCmdAsync(AgentCommand cmd, CancellationToken ct)
@@ -101,8 +115,7 @@ public class CommandPoller
         if (script == null)
             return new CommandResult { CommandId = cmd.Id, Error = "missing script in payload", ExitCode = -1 };
 
-        var timeoutSec = GetTimeout(cmd);
-        return await RunProcessAsync(cmd.Id, "cmd.exe", $"/c {script}", timeoutSec, ct);
+        return await RunProcessAsync(cmd.Id, "cmd.exe", $"/c {script}", GetTimeout(cmd), ct);
     }
 
     private async Task<CommandResult> RunProcessAsync(
@@ -137,7 +150,7 @@ public class CommandPoller
             if (!string.IsNullOrWhiteSpace(stderr))
                 output += (output.Length > 0 ? "\n" : "") + "[stderr]\n" + stderr.TrimEnd();
 
-            _log.LogInformation("Command {Id} completed, exit={Code}, output_len={Len}",
+            _log.LogInformation("Command {Id} exit={Code} output_len={Len}",
                 cmdId, proc.ExitCode, output.Length);
 
             return new CommandResult

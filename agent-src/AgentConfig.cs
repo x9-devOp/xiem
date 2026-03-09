@@ -34,6 +34,7 @@ public class RegisterResponse
 {
     public string Token { get; set; } = "";
     public string ConfigUrl { get; set; } = "";
+    public string? PubKeyPem { get; set; }
 }
 
 public class IngestRequest
@@ -53,6 +54,7 @@ public class AgentCommand
     public int Id { get; set; }
     public string CommandType { get; set; } = "";
     public Dictionary<string, object?> Payload { get; set; } = new();
+    public string? Signature { get; set; }
 }
 
 public class CommandResult

@@ -20,6 +20,8 @@ builder.Services.AddHttpClient<ApiClient>(client =>
 builder.Services.AddSingleton<IModule, EsetNetworkModule>();
 builder.Services.AddSingleton<IModule, AuthFailuresModule>();
 builder.Services.AddSingleton<XiemAgent.Modules.ScriptModule>();
+builder.Services.AddSingleton<SignatureVerifier>();
+builder.Services.AddSingleton<PanicWatchdog>();
 builder.Services.AddSingleton<CommandPoller>();
 builder.Services.AddHostedService<Worker>();
 

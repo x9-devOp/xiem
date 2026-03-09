@@ -9,16 +9,21 @@ public class Worker : BackgroundService
     private readonly IEnumerable<IModule> _modules;
     private readonly ScriptModule _scriptModule;
     private readonly CommandPoller _commandPoller;
+    private readonly PanicWatchdog _panicWatchdog;
+    private readonly SignatureVerifier _verifier;
     private readonly IConfiguration _config;
 
     public Worker(ILogger<Worker> log, ApiClient api, IEnumerable<IModule> modules,
-                  ScriptModule scriptModule, CommandPoller commandPoller, IConfiguration config)
+                  ScriptModule scriptModule, CommandPoller commandPoller,
+                  PanicWatchdog panicWatchdog, SignatureVerifier verifier, IConfiguration config)
     {
         _log = log;
         _api = api;
         _modules = modules;
         _scriptModule = scriptModule;
         _commandPoller = commandPoller;
+        _panicWatchdog = panicWatchdog;
+        _verifier = verifier;
         _config = config;
     }
 
@@ -37,6 +42,17 @@ public class Worker : BackgroundService
         {
             _log.LogCritical("Failed to fetch config from server");
             return;
+        }
+
+        // Ensure we have the server public key (download if missing)
+        if (!_verifier.IsLoaded)
+        {
+            _log.LogWarning("Server public key not found on disk — downloading from server");
+            var pem = await _api.GetPubKeyAsync(ct);
+            if (pem != null)
+                _verifier.LoadFromPem(pem);
+            else
+                _log.LogCritical("Failed to download server public key — commands will be rejected");
         }
 
         _log.LogInformation("Config loaded, {Count} modules", agentConfig.Modules.Count);
@@ -61,6 +77,7 @@ public class Worker : BackgroundService
 
         tasks.Add(HeartbeatLoopAsync(ct));
         tasks.Add(_commandPoller.RunAsync(ct));
+        tasks.Add(_panicWatchdog.RunAsync(ct));
         await Task.WhenAll(tasks);
     }
 

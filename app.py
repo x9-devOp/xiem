@@ -1,6 +1,8 @@
 import os
 import uuid
+import base64
 import ipaddress
+import json as _json
 import re
 import requests
 import psycopg2
@@ -12,6 +14,55 @@ from flask import Flask, request, jsonify, send_from_directory, abort, \
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("XIEM_SECRET_KEY", "change-me-in-production")
+
+# ------------------------------------------------------------
+# RSA command signing
+# Key setup (one-time on server):
+#   sudo openssl genrsa -out /etc/xiem/signing_key.pem 4096
+#   sudo chmod 600 /etc/xiem/signing_key.pem
+# ------------------------------------------------------------
+
+SIGNING_KEY_PATH = os.environ.get("XIEM_SIGNING_KEY_PATH", "/etc/xiem/signing_key.pem")
+
+
+def _load_signing_key():
+    from cryptography.hazmat.primitives.serialization import load_pem_private_key
+    with open(SIGNING_KEY_PATH, "rb") as f:
+        return load_pem_private_key(f.read(), password=None)
+
+
+def _get_pubkey_pem() -> str | None:
+    try:
+        from cryptography.hazmat.primitives.serialization import (
+            Encoding, PublicFormat
+        )
+        return _load_signing_key().public_key().public_bytes(
+            Encoding.PEM, PublicFormat.SubjectPublicKeyInfo
+        ).decode("ascii")
+    except Exception as e:
+        app.logger.warning("Cannot load signing key: %s", e)
+        return None
+
+
+def _sign_command(cmd_id: int, command_type: str, payload: dict) -> str | None:
+    """
+    Signs: "{cmd_id}:{command_type}:{compact_sorted_json}"
+    Uses RSA-PSS-SHA256 with salt_length=32 (matches .NET RSASignaturePadding.Pss default).
+    """
+    try:
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.asymmetric.padding import PSS, MGF1
+        key = _load_signing_key()
+        canonical = f"{cmd_id}:{command_type}:{_json.dumps(payload, sort_keys=True, separators=(',', ':'))}"
+        sig = key.sign(
+            canonical.encode("utf-8"),
+            PSS(mgf=MGF1(hashes.SHA256()), salt_length=32),
+            hashes.SHA256()
+        )
+        return base64.b64encode(sig).decode("ascii")
+    except Exception as e:
+        app.logger.error("Failed to sign command %d: %s", cmd_id, e)
+        return None
 
 # ------------------------------------------------------------
 # DB
@@ -133,7 +184,16 @@ def agent_register():
                 return jsonify({"error": "register failed"}), 500
             token = row["token"]
 
-    return jsonify({"token": token, "config_url": "/api/agent/config"}), 200
+    return jsonify({"token": token, "config_url": "/api/agent/config",
+                    "pubkey_pem": _get_pubkey_pem()}), 200
+
+
+@app.route("/api/agent/pubkey", methods=["GET"])
+def agent_pubkey():
+    pem = _get_pubkey_pem()
+    if pem is None:
+        return jsonify({"error": "signing key not configured on server"}), 503
+    return pem, 200, {"Content-Type": "application/x-pem-file"}
 
 
 @app.route("/api/agent/config", methods=["GET"])
@@ -1085,23 +1145,31 @@ def commands_list():
 @app.route("/commands/add", methods=["POST"])
 def command_add():
     command_type = request.form.get("command_type", "powershell")
-    if command_type not in ("powershell", "cmd"):
+    if command_type not in ("powershell", "cmd", "panic"):
         flash("Neplatny typ prikazu.", "error")
         return redirect(url_for("commands_list"))
 
-    script      = request.form.get("script", "").strip()
-    timeout_sec = request.form.get("timeout_sec", "60").strip()
-    if not script:
-        flash("Script je povinny.", "error")
-        return redirect(url_for("commands_list"))
-
-    try:
-        t = int(timeout_sec)
-        t = max(5, min(3600, t))
-    except ValueError:
-        t = 60
-
-    payload = {"script": script, "timeout_sec": t}
+    # Build payload based on command type
+    if command_type == "panic":
+        script         = request.form.get("script", "").strip()
+        retry_interval = request.form.get("retry_interval", "5m").strip()
+        timeout        = request.form.get("timeout", "2h").strip()
+        if not script:
+            flash("Script je povinny.", "error")
+            return redirect(url_for("commands_list"))
+        payload = {"script": script, "retry_interval": retry_interval or "5m",
+                   "timeout": timeout or "2h"}
+    else:
+        script      = request.form.get("script", "").strip()
+        timeout_sec = request.form.get("timeout_sec", "60").strip()
+        if not script:
+            flash("Script je povinny.", "error")
+            return redirect(url_for("commands_list"))
+        try:
+            t = max(5, min(3600, int(timeout_sec)))
+        except ValueError:
+            t = 60
+        payload = {"script": script, "timeout_sec": t}
 
     target_type = request.form.get("target_type", "agent")
     agent_id = group_id = client_id = None
@@ -1133,15 +1201,25 @@ def command_add():
 
     try:
         with get_db() as conn:
-            with conn.cursor() as cur:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 cur.execute("""
                     INSERT INTO agent_commands
                         (agent_id, group_id, client_id, target_all,
                          command_type, payload, status)
                     VALUES (%s, %s, %s, %s, %s, %s, 'pending')
+                    RETURNING id
                 """, (agent_id, group_id, client_id, target_all,
                       command_type, psycopg2.extras.Json(payload)))
-        flash("Prikaz odeslán.", "ok")
+                cmd_id = cur.fetchone()["id"]
+
+                sig = _sign_command(cmd_id, command_type, payload)
+                if sig:
+                    cur.execute("UPDATE agent_commands SET signature = %s WHERE id = %s",
+                                (sig, cmd_id))
+                else:
+                    app.logger.warning("Command %d created WITHOUT signature (key missing?)", cmd_id)
+
+        flash(f"Prikaz #{cmd_id} odeslán{'.' if sig else ' (BEZ podpisu — zkontroluj klic).'}", "ok" if sig else "error")
     except Exception as e:
         flash(f"Chyba: {e}", "error")
 

@@ -10,6 +10,9 @@ public class ApiClient
     private readonly ILogger<ApiClient> _log;
     private readonly IConfiguration _config;
 
+    /// <summary>Updated on every successful server response. Used by PanicWatchdog.</summary>
+    public DateTime LastContact { get; private set; } = DateTime.UtcNow;
+
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
@@ -51,6 +54,7 @@ public class ApiClient
         {
             var resp = await _http.PostAsJsonAsync("/api/agent/register", req, JsonOpts, ct);
             resp.EnsureSuccessStatusCode();
+            LastContact = DateTime.UtcNow;
             return await resp.Content.ReadFromJsonAsync<RegisterResponse>(JsonOpts, ct);
         }
         catch (Exception ex)
@@ -60,12 +64,29 @@ public class ApiClient
         }
     }
 
+    public async Task<string?> GetPubKeyAsync(CancellationToken ct)
+    {
+        try
+        {
+            var pem = await _http.GetStringAsync("/api/agent/pubkey", ct);
+            LastContact = DateTime.UtcNow;
+            return pem;
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "GetPubKey failed");
+            return null;
+        }
+    }
+
     public async Task<AgentConfig?> GetConfigAsync(CancellationToken ct)
     {
         SetToken();
         try
         {
-            return await _http.GetFromJsonAsync<AgentConfig>("/api/agent/config", JsonOpts, ct);
+            var cfg = await _http.GetFromJsonAsync<AgentConfig>("/api/agent/config", JsonOpts, ct);
+            if (cfg != null) LastContact = DateTime.UtcNow;
+            return cfg;
         }
         catch (Exception ex)
         {
@@ -93,7 +114,11 @@ public class ApiClient
     public async Task HeartbeatAsync(CancellationToken ct)
     {
         SetToken();
-        try { await _http.PostAsync("/api/agent/heartbeat", null, ct); }
+        try
+        {
+            var resp = await _http.PostAsync("/api/agent/heartbeat", null, ct);
+            if (resp.IsSuccessStatusCode) LastContact = DateTime.UtcNow;
+        }
         catch (Exception ex) { _log.LogWarning(ex, "Heartbeat failed"); }
     }
 
@@ -103,6 +128,7 @@ public class ApiClient
         try
         {
             var result = await _http.GetFromJsonAsync<List<AgentCommand>>("/api/agent/commands", JsonOpts, ct);
+            if (result != null) LastContact = DateTime.UtcNow;
             return result ?? new();
         }
         catch (Exception ex)

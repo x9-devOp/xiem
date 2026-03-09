@@ -13,9 +13,10 @@
     <div class="form-row" style="margin-bottom:10px">
       <div class="form-group">
         <label>Typ</label>
-        <select name="command_type">
+        <select name="command_type" id="cmd-type" onchange="updateCmdType()">
           <option value="powershell">PowerShell</option>
           <option value="cmd">CMD</option>
+          <option value="panic" style="color:#ff3b5c">&#9888; PANIC</option>
         </select>
       </div>
       <div class="form-group">
@@ -67,9 +68,24 @@
                   placeholder="Get-Date&#10;Get-LocalUser | Select Name,Enabled | ConvertTo-Json"
                   style="width:100%;font-family:monospace;font-size:12px;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text-hi);resize:vertical"></textarea>
       </div>
-      <div style="display:flex;align-items:flex-end">
-        <button type="submit" class="btn btn-primary">&#9654; Odeslat</button>
+      <div id="panic-fields" style="display:none;flex-direction:column;gap:8px">
+        <div class="form-group">
+          <label>Timeout (offline po jak dlouho spustit)</label>
+          <input type="text" name="timeout" value="2h" placeholder="2h / 30m / 1d"
+                 style="width:100px">
+        </div>
+        <div class="form-group">
+          <label>Retry interval (po spusteni)</label>
+          <input type="text" name="retry_interval" value="5m" placeholder="5m / 1h"
+                 style="width:100px">
+        </div>
       </div>
+      <div style="display:flex;align-items:flex-end">
+        <button type="submit" id="submit-btn" class="btn btn-primary">&#9654; Odeslat</button>
+      </div>
+    </div>
+    <div id="panic-warning" style="display:none;margin-top:10px;padding:10px 14px;background:rgba(255,59,92,0.08);border:1px solid rgba(255,59,92,0.3);border-radius:4px;font-size:12px;color:var(--danger)">
+      &#9888; PANIC command bude podepsan a distribuovan. Agent ho spusti po disconnectu delsi nez <strong>timeout</strong>. Akce je nevratna.
     </div>
   </form>
 </div>
@@ -164,6 +180,16 @@ function updateTarget() {
   document.getElementById('tgt-group').style.display  = (t === 'group')  ? 'flex' : 'none';
   document.getElementById('tgt-client').style.display = (t === 'client') ? 'flex' : 'none';
 }
+function updateCmdType() {
+  var isPanic = document.getElementById('cmd-type').value === 'panic';
+  document.getElementById('panic-fields').style.display  = isPanic ? 'flex' : 'none';
+  document.getElementById('panic-warning').style.display = isPanic ? 'block' : 'none';
+  document.getElementById('submit-btn').textContent = isPanic ? '⚠ Odeslat PANIC' : '▶ Odeslat';
+  document.getElementById('submit-btn').style.background = isPanic ? 'var(--danger)' : '';
+  document.getElementById('submit-btn').style.borderColor = isPanic ? 'var(--danger)' : '';
+  document.getElementById('submit-btn').style.color = isPanic ? '#fff' : '';
+}
 updateTarget();
+updateCmdType();
 </script>
 {% endblock %}
