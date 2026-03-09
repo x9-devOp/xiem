@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %} — Analyza{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Analyza</h1>
+  <p>Nastroje pro vysetreni IP adres a top offenders</p>
+</div>
+
+<div class="card">
+  <div class="card-title">IP Lookup <span style="font-weight:400;color:var(--accent);font-size:11px">— roadmap</span></div>
+  <p style="color:var(--muted);font-size:13px">
+    Vyhledat proc je dana IP adresa v blocklistu — ktere zdroje ji pokryvaji,
+    jakou ma skore, kdy se poprve/naposledy vyskytnula.
+  </p>
+  <div style="margin-top:16px;padding:16px;background:rgba(0,212,170,0.04);border:1px solid rgba(0,212,170,0.15);border-radius:4px">
+    <span style="font-size:12px;color:var(--muted)">Naplanovano v dalsi iteraci.</span>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">Top Offenders <span style="font-weight:400;color:var(--accent);font-size:11px">— roadmap</span></div>
+  <p style="color:var(--muted);font-size:13px">
+    IP adresy s nejvyssim skore across vsech zdroju — auth_failures, ESET,
+    upstream feeds, agent_events.
+  </p>
+  <div style="margin-top:16px;padding:16px;background:rgba(0,212,170,0.04);border:1px solid rgba(0,212,170,0.15);border-radius:4px">
+    <span style="font-size:12px;color:var(--muted)">Naplanovano v dalsi iteraci.</span>
+  </div>
+</div>
+{% endblock %}

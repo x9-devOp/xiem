@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %} — Agent: {{ agent.hostname }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>
+    <a href="{{ url_for('agents_list') }}" style="color:var(--muted);text-decoration:none;font-weight:400">Agenti</a>
+    <span style="color:var(--border)"> / </span>
+    {{ agent.hostname }}
+    {% if agent.aktivni and agent.posledni_kontakt and (now - agent.posledni_kontakt).total_seconds() < 3600 %}
+      <span class="dot dot-on" style="margin-left:8px"></span>
+    {% else %}
+      <span class="dot dot-off" style="margin-left:8px"></span>
+    {% endif %}
+  </h1>
+  <p class="mono" style="font-size:12px">{{ agent.fqdn or agent.ip_adresa or '—' }}</p>
+</div>
+
+<!-- Info + akce -->
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px">
+  <div class="card" style="margin:0">
+    <div class="card-title">Informace</div>
+    <table style="font-size:13px">
+      <tr><td style="color:var(--muted);width:140px;padding:6px 12px">Hostname</td><td class="mono">{{ agent.hostname }}</td></tr>
+      <tr><td style="color:var(--muted);padding:6px 12px">FQDN</td><td class="mono">{{ agent.fqdn or '—' }}</td></tr>
+      <tr><td style="color:var(--muted);padding:6px 12px">IP adresa</td><td class="mono">{{ agent.ip_adresa or '—' }}</td></tr>
+      <tr><td style="color:var(--muted);padding:6px 12px">Skupina</td><td><span class="badge badge-off">{{ agent.group_name or '—' }}</span></td></tr>
+      <tr><td style="color:var(--muted);padding:6px 12px">Verze agenta</td><td class="mono">{{ agent.verze_agenta or '—' }}</td></tr>
+      <tr><td style="color:var(--muted);padding:6px 12px">Posledni kontakt</td><td class="mono">{{ agent.posledni_kontakt.strftime('%Y-%m-%d %H:%M:%S') if agent.posledni_kontakt else '—' }}</td></tr>
+      <tr><td style="color:var(--muted);padding:6px 12px">Status</td><td>
+        {% if not agent.aktivni %}
+          <span class="badge badge-off">deaktivovan</span>
+        {% elif agent.posledni_kontakt and (now - agent.posledni_kontakt).total_seconds() < 3600 %}
+          <span class="badge badge-on">online</span>
+        {% else %}
+          <span class="badge badge-off">offline</span>
+        {% endif %}
+      </td></tr>
+    </table>
+  </div>
+
+  <div class="card" style="margin:0">
+    <div class="card-title">Sprava</div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <form method="POST" action="{{ url_for('agent_assign_client', agent_id=agent.id) }}"
+            style="display:flex;gap:8px;align-items:center">
+        <div class="form-group" style="flex:1;margin:0">
+          <label>Klient</label>
+          <select name="client_id">
+            <option value="">— bez klienta —</option>
+            {% for c in clients %}
+            <option value="{{ c.id }}" {% if agent.client_id == c.id %}selected{% endif %}>{{ c.nazev }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div style="display:flex;align-items:flex-end">
+          <button type="submit" class="btn btn-primary btn-sm">Ulozit</button>
+        </div>
+      </form>
+      <form method="POST" action="{{ url_for('agent_toggle', agent_id=agent.id) }}">
+        <button type="submit" class="btn {% if agent.aktivni %}btn-danger{% else %}btn-ghost{% endif %} btn-sm">
+          {{ '⏸ Deaktivovat agenta' if agent.aktivni else '▶ Aktivovat agenta' }}
+        </button>
+      </form>
+      <div>
+        <a href="{{ url_for('commands_list') }}" class="btn btn-ghost btn-sm">&#9654; Novy prikaz</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modul config -->
+<div class="card">
+  <div class="card-title">Modul konfigurace skupiny <span style="font-weight:400;color:var(--muted)">({{ agent.group_name }})</span></div>
+  {% if modules %}
+  <div style="display:grid;grid-template-columns:160px 100px 80px 90px 1fr;gap:0;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.8px;padding:0 0 8px;border-bottom:1px solid var(--border);margin-bottom:4px">
+    <span>Modul</span><span>Typ</span><span>Interval</span><span>Status</span><span>IP field</span>
+  </div>
+  {% for m in modules %}
+  <div style="display:grid;grid-template-columns:160px 100px 80px 90px 1fr;gap:0;align-items:center;padding:8px 0;border-bottom:1px solid rgba(37,42,53,0.4);font-size:12px">
+    <span class="mono" style="color:var(--text-hi)">{{ m.modul }}</span>
+    <span><span class="badge badge-off">{{ m.module_type }}</span></span>
+    <span class="mono" style="color:var(--muted)">{{ m.interval_sec }}s</span>
+    <span>
+      {% if m.enabled %}
+        <span class="badge badge-on">on</span>
+      {% else %}
+        <span class="badge badge-off">off</span>
+      {% endif %}
+    </span>
+    <span class="mono" style="color:var(--muted);font-size:11px">
+      {% if m.parametry and m.parametry.ip_field %}{{ m.parametry.ip_field }}{% else %}—{% endif %}
+    </span>
+  </div>
+  {% endfor %}
+  {% else %}
+  <p style="color:var(--muted);font-size:13px">Zadna konfigurace modulu pro skupinu {{ agent.group_name }}.</p>
+  {% endif %}
+</div>
+
+<!-- Posledni prikazy -->
+<div class="card">
+  <div class="card-title">Posledni prikazy (max 20)</div>
+  <table>
+    <thead>
+      <tr><th>ID</th><th>Typ</th><th>Status</th><th>Vytvoreno</th><th>Provedeno</th><th>Vysledek</th></tr>
+    </thead>
+    <tbody>
+      {% for cmd in commands %}
+      <tr>
+        <td class="mono" style="color:var(--muted)">{{ cmd.id }}</td>
+        <td><span class="badge badge-off">{{ cmd.command_type }}</span></td>
+        <td>
+          {% if cmd.status == 'completed' %}<span class="badge badge-on">done</span>
+          {% elif cmd.status == 'running' %}<span class="badge badge-warn">running</span>
+          {% elif cmd.status == 'pending' %}<span class="badge badge-off">pending</span>
+          {% else %}<span class="badge badge-off">{{ cmd.status }}</span>{% endif %}
+        </td>
+        <td class="mono" style="color:var(--muted);font-size:11px">{{ cmd.created_at.strftime('%m-%d %H:%M') if cmd.created_at else '—' }}</td>
+        <td class="mono" style="color:var(--muted);font-size:11px">{{ cmd.executed_at.strftime('%m-%d %H:%M') if cmd.executed_at else '—' }}</td>
+        <td style="max-width:300px">
+          {% if cmd.result %}
+            {% if cmd.result.error %}
+              <span class="mono" style="color:var(--danger);font-size:11px">{{ cmd.result.error[:80] }}</span>
+            {% elif cmd.result.output %}
+              <details style="cursor:pointer">
+                <summary style="font-size:11px;color:var(--accent);outline:none">exit={{ cmd.result.exit_code }} · {{ cmd.result.output | length }} znaku</summary>
+                <pre style="margin-top:6px;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;font-size:11px;white-space:pre-wrap;max-height:200px;overflow-y:auto">{{ cmd.result.output[:2000] }}</pre>
+              </details>
+            {% else %}
+              <span class="mono" style="color:var(--muted);font-size:11px">exit={{ cmd.result.exit_code }}</span>
+            {% endif %}
+          {% else %}—{% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" style="color:var(--muted);text-align:center;padding:20px">Zadne prikazy.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Agent events -->
+<div class="card">
+  <div class="card-title">Agent events (poslednich 50)</div>
+  {% if events %}
+  <table>
+    <thead>
+      <tr><th>Cas</th><th>Modul</th><th>Payload (zkraceno)</th></tr>
+    </thead>
+    <tbody>
+      {% for ev in events %}
+      <tr>
+        <td class="mono" style="color:var(--muted);font-size:11px;white-space:nowrap">{{ ev.created_at.strftime('%Y-%m-%d %H:%M:%S') if ev.created_at else '—' }}</td>
+        <td><span class="badge badge-off">{{ ev.module }}</span></td>
+        <td style="max-width:500px">
+          <details style="cursor:pointer">
+            <summary style="font-size:11px;color:var(--muted);outline:none">
+              {% set payload_str = ev.payload | tojson %}
+              {{ payload_str[:100] }}{% if payload_str | length > 100 %}…{% endif %}
+            </summary>
+            <pre style="margin-top:6px;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;font-size:11px;white-space:pre-wrap;max-height:200px;overflow-y:auto">{{ ev.payload | tojson(indent=2) }}</pre>
+          </details>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:var(--muted);font-size:13px">Zadne eventy pro tohoto agenta.</p>
+  {% endif %}
+</div>
+{% endblock %}

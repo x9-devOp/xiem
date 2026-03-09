@@ -36,6 +36,14 @@
     <div class="label">ESET blocks 24h</div>
     <div class="value warn">{{ eset_24h }}</div>
   </div>
+  <div class="stat-card">
+    <div class="label">Agent events 24h</div>
+    <div class="value">{{ events_24h }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Pending commands</div>
+    <div class="value {% if commands_pending > 0 %}warn{% endif %}">{{ commands_pending }}</div>
+  </div>
 </div>
 
 <div class="card">
@@ -54,7 +62,7 @@
     <tbody>
       {% for a in recent_agents %}
       <tr>
-        <td class="mono">{{ a.hostname }}</td>
+        <td class="mono"><a href="{{ url_for('agent_detail', agent_id=a.id) }}" style="color:var(--text-hi);text-decoration:none">{{ a.hostname }}</a></td>
         <td class="mono" style="color:var(--muted)">{{ a.fqdn or '—' }}</td>
         <td><span class="badge badge-off">{{ a.group_name or '—' }}</span></td>
         <td class="mono">{{ a.ip_adresa or '—' }}</td>

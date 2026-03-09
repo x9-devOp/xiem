@@ -371,6 +371,77 @@ def download_agent():
 def health():
     return jsonify({"status": "ok"}), 200
 
+@app.route("/agents/<int:agent_id>")
+def agent_detail(agent_id):
+    now = datetime.utcnow()
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                SELECT a.*, ag.nazev AS group_name, c.nazev AS client_name
+                FROM agents a
+                LEFT JOIN agent_groups ag ON a.group_id = ag.id
+                LEFT JOIN clients c ON a.client_id = c.id
+                WHERE a.id = %s
+            """, (agent_id,))
+            agent = cur.fetchone()
+            if not agent:
+                abort(404)
+
+            cur.execute("""
+                SELECT * FROM agent_module_config
+                WHERE group_id = %s ORDER BY modul
+            """, (agent["group_id"],))
+            modules = cur.fetchall()
+
+            cur.execute("""
+                SELECT ac.id, ac.command_type, ac.status, ac.created_at,
+                       ac.executed_at, ac.result
+                FROM agent_commands ac
+                WHERE ac.agent_id = %s
+                   OR ac.group_id = %s
+                   OR ac.target_all = true
+                ORDER BY ac.created_at DESC
+                LIMIT 20
+            """, (agent_id, agent["group_id"]))
+            commands = cur.fetchall()
+
+            cur.execute("""
+                SELECT module, payload, created_at
+                FROM agent_events
+                WHERE agent_id = %s
+                ORDER BY created_at DESC
+                LIMIT 50
+            """, (agent_id,))
+            events = cur.fetchall()
+
+            cur.execute("SELECT id, nazev FROM clients ORDER BY nazev")
+            clients = cur.fetchall()
+
+    return render_template("agent_detail.html",
+                           agent=agent, modules=modules, commands=commands,
+                           events=events, clients=clients, now=now)
+
+
+@app.route("/lists/<int:list_id>/interval", methods=["POST"])
+def list_interval_update(list_id):
+    try:
+        interval_min = int(request.form.get("interval_min", 60))
+        interval_min = max(1, min(1440, interval_min))
+    except ValueError:
+        interval_min = 60
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE output_lists SET interval_min = %s WHERE id = %s",
+                        (interval_min, list_id))
+    flash(f"Interval nastaven na {interval_min} min.", "ok")
+    return redirect(url_for("list_detail", list_id=list_id))
+
+
+@app.route("/analyze")
+def analyze():
+    return render_template("analyze.html")
+
+
 # ============================================================
 # Management web — Dashboard
 # ============================================================
@@ -412,7 +483,7 @@ def dashboard():
             eset_24h = cur.fetchone()["n"]
 
             cur.execute("""
-                SELECT a.hostname, a.fqdn, ag.nazev AS group_name, a.ip_adresa,
+                SELECT a.id, a.hostname, a.fqdn, ag.nazev AS group_name, a.ip_adresa,
                        a.posledni_kontakt, a.aktivni
                 FROM agents a
                 LEFT JOIN agent_groups ag ON a.group_id = ag.id
@@ -422,10 +493,20 @@ def dashboard():
             """)
             recent_agents = cur.fetchall()
 
+            cur.execute("SELECT COUNT(*) AS n FROM agent_commands WHERE status = 'pending'")
+            commands_pending = cur.fetchone()["n"]
+
+            cur.execute("""
+                SELECT COUNT(*) AS n FROM agent_events
+                WHERE created_at >= now() - INTERVAL '24 hours'
+            """)
+            events_24h = cur.fetchone()["n"]
+
     return render_template("dashboard.html",
         now=now, agents_active=agents_active, agents_online=agents_online,
         feed_ips=feed_ips, feeds_active=feeds_active, manual_ips=manual_ips,
-        auth_24h=auth_24h, eset_24h=eset_24h, recent_agents=recent_agents)
+        auth_24h=auth_24h, eset_24h=eset_24h, recent_agents=recent_agents,
+        commands_pending=commands_pending, events_24h=events_24h)
 
 # ============================================================
 # Upstream Feeds

@@ -13,6 +13,22 @@
      <a href="https://xiem.x9.cz/IP_LISTS/{{ lst.nazev }}.txt" target="_blank"
         style="color:var(--muted);font-size:12px">/IP_LISTS/{{ lst.nazev }}.txt ↗</a>
   </p>
+  <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
+    <span style="font-size:12px;color:var(--muted)">Interval generovani:</span>
+    <form method="POST" action="{{ url_for('list_interval_update', list_id=lst.id) }}"
+          style="display:flex;align-items:center;gap:6px">
+      <input type="number" name="interval_min" value="{{ lst.interval_min }}"
+             min="1" max="1440"
+             style="width:70px;padding:4px 8px;font-size:12px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text-hi)">
+      <span style="font-size:12px;color:var(--muted)">min</span>
+      <button type="submit" class="btn btn-ghost btn-sm">Ulozit</button>
+    </form>
+    {% if lst.last_generated %}
+      <span style="font-size:11px;color:var(--muted)">
+        naposledy: {{ lst.last_generated.strftime('%Y-%m-%d %H:%M') }}
+      </span>
+    {% endif %}
+  </div>
 </div>
 
 <div class="card">
