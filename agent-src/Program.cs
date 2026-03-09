@@ -19,6 +19,7 @@ builder.Services.AddHttpClient<ApiClient>(client =>
 
 builder.Services.AddSingleton<IModule, EsetNetworkModule>();
 builder.Services.AddSingleton<IModule, AuthFailuresModule>();
+builder.Services.AddSingleton<XiemAgent.Modules.ScriptModule>();
 builder.Services.AddHostedService<Worker>();
 
 var host = builder.Build();

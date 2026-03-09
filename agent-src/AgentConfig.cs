@@ -11,6 +11,7 @@ public class ModuleConfig
     public string Name { get; set; } = "";
     public bool Enabled { get; set; }
     public int IntervalSec { get; set; } = 3600;
+    public string ModuleType { get; set; } = "native";
     public Dictionary<string, object?> Params { get; set; } = new();
 
     public string GetString(string key, string defaultValue = "") =>

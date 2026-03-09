@@ -7,13 +7,15 @@ public class Worker : BackgroundService
     private readonly ILogger<Worker> _log;
     private readonly ApiClient _api;
     private readonly IEnumerable<IModule> _modules;
+    private readonly ScriptModule _scriptModule;
     private readonly IConfiguration _config;
 
-    public Worker(ILogger<Worker> log, ApiClient api, IEnumerable<IModule> modules, IConfiguration config)
+    public Worker(ILogger<Worker> log, ApiClient api, IEnumerable<IModule> modules, ScriptModule scriptModule, IConfiguration config)
     {
         _log = log;
         _api = api;
         _modules = modules;
+        _scriptModule = scriptModule;
         _config = config;
     }
 
@@ -39,10 +41,16 @@ public class Worker : BackgroundService
         var tasks = new List<Task>();
         foreach (var moduleCfg in agentConfig.Modules.Where(m => m.Enabled))
         {
+            if (moduleCfg.ModuleType == "powershell")
+            {
+                tasks.Add(RunScriptModuleLoopAsync(moduleCfg, ct));
+                continue;
+            }
+
             var module = _modules.FirstOrDefault(m => m.Name == moduleCfg.Name);
             if (module == null)
             {
-                _log.LogWarning("Module {Name} not found", moduleCfg.Name);
+                _log.LogWarning("Module {Name} not found (type={Type})", moduleCfg.Name, moduleCfg.ModuleType);
                 continue;
             }
             tasks.Add(RunModuleLoopAsync(module, moduleCfg, ct));
@@ -86,6 +94,42 @@ public class Worker : BackgroundService
         }
 
         _log.LogInformation("Module {Name} stopped", module.Name);
+    }
+
+    private async Task RunScriptModuleLoopAsync(ModuleConfig config, CancellationToken ct)
+    {
+        var interval = TimeSpan.FromSeconds(config.IntervalSec);
+        _log.LogInformation("ScriptModule [{Name}] starting, interval={Interval}s", config.Name, config.IntervalSec);
+
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                var records = await _scriptModule.CollectAsync(config, ct);
+                if (records.Count > 0)
+                {
+                    var result = await _api.IngestAsync(new IngestRequest
+                    {
+                        Module  = config.Name,
+                        Records = records
+                    }, ct);
+
+                    if (result != null)
+                        _log.LogInformation("ScriptModule [{Name}]: inserted={Inserted} skipped={Skipped}",
+                            config.Name, result.Inserted, result.Skipped);
+                }
+            }
+            catch (OperationCanceledException) { break; }
+            catch (Exception ex)
+            {
+                _log.LogError(ex, "ScriptModule [{Name}] failed, will retry next interval", config.Name);
+            }
+
+            try { await Task.Delay(interval, ct); }
+            catch (OperationCanceledException) { break; }
+        }
+
+        _log.LogInformation("ScriptModule [{Name}] stopped", config.Name);
     }
 
     private async Task HeartbeatLoopAsync(CancellationToken ct)

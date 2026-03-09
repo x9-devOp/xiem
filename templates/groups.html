@@ -24,7 +24,9 @@
     <div style="display:grid;grid-template-columns:160px 120px 120px 90px 80px;gap:0;align-items:center;padding:8px 0;border-bottom:1px solid rgba(37,42,53,0.4)">
       <span class="mono" style="color:var(--text-hi)">{{ m.modul }}</span>
       <span>
-        <select name="module_type" style="width:110px;padding:4px 8px;font-size:11px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text-hi)">
+        <select name="module_type" class="mt-sel-{{ group.id }}-{{ loop.index }}"
+                onchange="toggleScript(this, 'ps-{{ group.id }}-{{ loop.index }}')"
+                style="width:110px;padding:4px 8px;font-size:11px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text-hi)">
           <option value="native"     {% if m.module_type == 'native' %}selected{% endif %}>native (C#)</option>
           <option value="powershell" {% if m.module_type == 'powershell' %}selected{% endif %}>powershell</option>
           <option value="cmd"        {% if m.module_type == 'cmd' %}selected{% endif %}>cmd</option>
@@ -49,6 +51,41 @@
         <button type="submit" class="btn btn-primary btn-sm">Ulozit</button>
       </span>
     </div>
+    {# Script parametry — visible only for powershell type #}
+    <div id="ps-{{ group.id }}-{{ loop.index }}"
+         style="display:{% if m.module_type == 'powershell' %}block{% else %}none{% endif %};padding:8px 0 12px 0;border-bottom:1px solid rgba(37,42,53,0.4)">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:6px">
+        <div class="form-group" style="margin:0">
+          <label style="font-size:11px">Script (PowerShell)</label>
+          <textarea name="script" rows="3"
+                    style="width:100%;font-family:monospace;font-size:11px;padding:6px 8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text-hi);resize:vertical"
+          >{{ m.parametry.script if m.parametry and m.parametry.script else '' }}</textarea>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <div class="form-group" style="margin:0">
+            <label style="font-size:11px">IP field (nazev pole v JSON)</label>
+            <input type="text" name="ip_field"
+                   value="{{ m.parametry.ip_field if m.parametry and m.parametry.ip_field else '' }}"
+                   placeholder="napr. IPAddress"
+                   style="width:100%;padding:4px 8px;font-size:11px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text-hi)">
+          </div>
+          <div class="form-group" style="margin:0">
+            <label style="font-size:11px">Timeout (sec)</label>
+            <input type="number" name="timeout_sec"
+                   value="{{ m.parametry.timeout_sec if m.parametry and m.parametry.timeout_sec else 30 }}"
+                   min="5" max="300"
+                   style="width:80px;padding:4px 8px;font-size:11px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text-hi)">
+          </div>
+          <div class="form-group" style="margin:0">
+            <label style="font-size:11px">Field mapping (JSON obj, nepovinne)</label>
+            <input type="text" name="field_mapping"
+                   value="{{ m.parametry.field_mapping | tojson if m.parametry and m.parametry.field_mapping else '' }}"
+                   placeholder='{"JsonKey":"db_field"}'
+                   style="width:100%;padding:4px 8px;font-size:11px;font-family:monospace;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text-hi)">
+          </div>
+        </div>
+      </div>
+    </div>
   </form>
   {% endfor %}
   {% else %}
@@ -60,4 +97,10 @@
   <p style="color:var(--muted);text-align:center;padding:24px">Zadne skupiny.</p>
 </div>
 {% endfor %}
+
+<script>
+function toggleScript(sel, id) {
+  document.getElementById(id).style.display = (sel.value === 'powershell') ? 'block' : 'none';
+}
+</script>
 {% endblock %}

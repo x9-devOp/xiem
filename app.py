@@ -173,7 +173,7 @@ def agent_ingest(agent):
             elif module == "auth_failures":
                 inserted, skipped = _ingest_auth(cur, records, sourceserver)
             else:
-                return jsonify({"error": f"unknown module: {module}"}), 400
+                inserted, skipped = _ingest_agent_events(cur, agent["id"], module, records)
 
     return jsonify({"inserted": inserted, "skipped": skipped}), 200
 
@@ -191,6 +191,20 @@ def _ingest_eset(cur, records, sourceserver):
                   r.get("status"), r.get("protokol"), sourceserver))
             inserted += 1 if cur.rowcount > 0 else 0
             skipped  += 0 if cur.rowcount > 0 else 1
+        except Exception:
+            skipped += 1
+    return inserted, skipped
+
+
+def _ingest_agent_events(cur, agent_id, module, records):
+    inserted = skipped = 0
+    for r in records:
+        try:
+            cur.execute("""
+                INSERT INTO agent_events (agent_id, module, payload)
+                VALUES (%s, %s, %s)
+            """, (agent_id, module, psycopg2.extras.Json(r)))
+            inserted += 1
         except Exception:
             skipped += 1
     return inserted, skipped
@@ -566,6 +580,7 @@ def groups_list():
 
 @app.route("/groups/<int:group_id>/modules/<module_name>/update", methods=["POST"])
 def group_module_update(group_id, module_name):
+    import json as _json
     enabled = request.form.get("enabled") == "1"
     try:
         interval_sec = int(request.form.get("interval_sec", 3600))
@@ -576,13 +591,45 @@ def group_module_update(group_id, module_name):
     if module_type not in ("native", "powershell", "cmd"):
         module_type = "native"
 
+    # Build parametry from script-specific fields when module_type == powershell
+    parametry = None
+    if module_type == "powershell":
+        script      = request.form.get("script", "").strip()
+        ip_field    = request.form.get("ip_field", "").strip()
+        timeout_sec = request.form.get("timeout_sec", "30").strip()
+        fm_raw      = request.form.get("field_mapping", "").strip()
+
+        parametry = {}
+        if script:
+            parametry["script"] = script
+        if ip_field:
+            parametry["ip_field"] = ip_field
+        try:
+            parametry["timeout_sec"] = int(timeout_sec) if timeout_sec else 30
+        except ValueError:
+            parametry["timeout_sec"] = 30
+        if fm_raw:
+            try:
+                parametry["field_mapping"] = _json.loads(fm_raw)
+            except ValueError:
+                flash("Neplatny JSON v field_mapping.", "error")
+                return redirect(url_for("groups_list"))
+
     with get_db() as conn:
         with conn.cursor() as cur:
-            cur.execute("""
-                UPDATE agent_module_config
-                SET enabled = %s, interval_sec = %s, module_type = %s
-                WHERE group_id = %s AND modul = %s
-            """, (enabled, interval_sec, module_type, group_id, module_name))
+            if parametry is not None:
+                cur.execute("""
+                    UPDATE agent_module_config
+                    SET enabled = %s, interval_sec = %s, module_type = %s, parametry = %s
+                    WHERE group_id = %s AND modul = %s
+                """, (enabled, interval_sec, module_type,
+                      psycopg2.extras.Json(parametry), group_id, module_name))
+            else:
+                cur.execute("""
+                    UPDATE agent_module_config
+                    SET enabled = %s, interval_sec = %s, module_type = %s
+                    WHERE group_id = %s AND modul = %s
+                """, (enabled, interval_sec, module_type, group_id, module_name))
     flash(f"Modul {module_name} aktualizovan.", "ok")
     return redirect(url_for("groups_list"))
 
@@ -689,10 +736,11 @@ def list_detail(list_id):
 
 @app.route("/lists/<int:list_id>/sources/add", methods=["POST"])
 def list_source_add(list_id):
+    import json as _json
     source_type = request.form.get("source_type", "")
     source_id   = request.form.get("source_id") or None
 
-    if source_type not in ("auth_failures", "eset_network", "upstream_feed", "manual"):
+    if source_type not in ("auth_failures", "eset_network", "upstream_feed", "manual", "agent_events"):
         flash("Neplatny typ zdroje.", "error")
         return redirect(url_for("list_detail", list_id=list_id))
 
@@ -700,14 +748,24 @@ def list_source_add(list_id):
         flash("Vyberte feed.", "error")
         return redirect(url_for("list_detail", list_id=list_id))
 
+    parametry = None
+    if source_type == "agent_events":
+        ae_module   = request.form.get("ae_module", "").strip()
+        ae_ip_field = request.form.get("ae_ip_field", "ipadresa").strip()
+        if not ae_module:
+            flash("Zadejte nazev modulu pro agent_events.", "error")
+            return redirect(url_for("list_detail", list_id=list_id))
+        parametry = _json.dumps({"module": ae_module, "ip_field": ae_ip_field or "ipadresa"})
+
     try:
         with get_db() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO output_list_sources (list_id, source_type, source_id)
-                    VALUES (%s, %s, %s)
+                    INSERT INTO output_list_sources (list_id, source_type, source_id, parametry)
+                    VALUES (%s, %s, %s, %s)
                 """, (list_id, source_type,
-                      int(source_id) if source_id else None))
+                      int(source_id) if source_id else None,
+                      parametry))
         flash("Zdroj pridan.", "ok")
     except Exception as e:
         flash(f"Chyba: {e}", "error")

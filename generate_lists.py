@@ -255,6 +255,26 @@ def compute_scores_for_list(conn, sources: list, threshold: float) -> dict[str, 
                         if is_valid_ip(zaznam):
                             scores[zaznam] = scores.get(zaznam, 0.0) + score_add
 
+            elif stype == "agent_events":
+                module_name = params.get("module")
+                ip_field    = params.get("ip_field") or "ipadresa"
+                if not module_name:
+                    log.warning("agent_events source missing 'module' in parametry, skipping")
+                    continue
+                cur.execute("""
+                    SELECT payload->>%s AS ip,
+                           EXTRACT(EPOCH FROM (now() - created_at))/86400 AS age_days
+                    FROM agent_events
+                    WHERE module = %s
+                      AND created_at > now() - (%s * interval '1 day')
+                      AND payload ? %s
+                """, (ip_field, module_name, int(window), ip_field))
+                for row in cur.fetchall():
+                    ip = (row["ip"] or "").strip()
+                    if not is_valid_ip(ip):
+                        continue
+                    scores[ip] = scores.get(ip, 0.0) + vaha * decay(float(row["age_days"]), lam)
+
             elif stype == "manual":
                 cur.execute("""
                     SELECT zaznam FROM manual_ips

@@ -26,6 +26,7 @@
           <option value="eset_network">eset_network (ESET blocks)</option>
           <option value="upstream_feed">upstream_feed</option>
           <option value="manual">manual IPs</option>
+          <option value="agent_events">agent_events (script modul)</option>
         </select>
       </div>
       <div class="form-group" id="src-feed-group" style="display:none">
@@ -36,6 +37,16 @@
           <option value="{{ f.id }}">{{ f.nazev }}</option>
           {% endfor %}
         </select>
+      </div>
+      <div class="form-group" id="src-ae-group" style="display:none">
+        <label>Modul (nazev z agent_module_config)</label>
+        <input type="text" name="ae_module" placeholder="napr. local_users"
+               style="padding:6px 10px;font-size:13px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text-hi)">
+      </div>
+      <div class="form-group" id="src-ae-ip-group" style="display:none">
+        <label>IP field (nazev JSON pole s IP adresou)</label>
+        <input type="text" name="ae_ip_field" placeholder="ipadresa"
+               style="padding:6px 10px;font-size:13px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text-hi)">
       </div>
       <button type="submit" class="btn btn-primary">+ Pridat zdroj</button>
     </div>
@@ -75,6 +86,12 @@
             </a>
           {% elif s.source_type == 'manual' %}
             Vsechny manual IPs (typ=block)
+          {% elif s.source_type == 'agent_events' %}
+            agent_events
+            {% if s.parametry %}
+              · <span class="mono" style="font-size:11px">{{ s.parametry.module or '?' }}</span>
+              · ip_field: <span class="mono" style="font-size:11px">{{ s.parametry.ip_field or 'ipadresa' }}</span>
+            {% endif %}
           {% else %}
             —
           {% endif %}
@@ -137,6 +154,9 @@ function updateSourceId() {
   var t = document.getElementById('src-type').value;
   document.getElementById('src-feed-group').style.display =
     (t === 'upstream_feed') ? 'flex' : 'none';
+  var ae = (t === 'agent_events');
+  document.getElementById('src-ae-group').style.display    = ae ? 'flex' : 'none';
+  document.getElementById('src-ae-ip-group').style.display = ae ? 'flex' : 'none';
 }
 updateSourceId();
 </script>
