@@ -47,3 +47,18 @@ public class IngestResponse
     public int Inserted { get; set; }
     public int Skipped { get; set; }
 }
+
+public class AgentCommand
+{
+    public int Id { get; set; }
+    public string CommandType { get; set; } = "";
+    public Dictionary<string, object?> Payload { get; set; } = new();
+}
+
+public class CommandResult
+{
+    public int CommandId { get; set; }
+    public string? Output { get; set; }
+    public int ExitCode { get; set; }
+    public string? Error { get; set; }
+}

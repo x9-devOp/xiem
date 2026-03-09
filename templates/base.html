@@ -371,6 +371,9 @@
     <li><a href="{{ url_for('groups_list') }}" class="{{ 'active' if request.endpoint in ['groups_list'] }}">
       <span class="icon">⊞</span> Skupiny
     </a></li>
+    <li><a href="{{ url_for('commands_list') }}" class="{{ 'active' if request.endpoint == 'commands_list' }}">
+      <span class="icon">&#9654;</span> Prikazy
+    </a></li>
     <div class="section-label">Blocklists</div>
     <li><a href="{{ url_for('feeds_list') }}" class="{{ 'active' if request.endpoint == 'feeds_list' }}">
       <span class="icon">↓</span> Upstream Feeds

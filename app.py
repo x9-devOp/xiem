@@ -242,6 +242,59 @@ def agent_heartbeat(agent):
     return jsonify({"ok": True}), 200
 
 
+@app.route("/api/agent/commands", methods=["GET"])
+@require_agent
+def agent_get_commands(agent):
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                SELECT id, command_type, payload
+                FROM agent_commands
+                WHERE status = 'pending'
+                  AND (
+                    agent_id  = %(aid)s
+                    OR group_id  = %(gid)s
+                    OR (client_id IS NOT NULL AND client_id = %(cid)s)
+                    OR target_all = true
+                  )
+                ORDER BY created_at
+            """, {"aid": agent["id"], "gid": agent["group_id"],
+                  "cid": agent.get("client_id")})
+            commands = cur.fetchall()
+
+            if commands:
+                ids = [c["id"] for c in commands]
+                cur.execute("""
+                    UPDATE agent_commands SET status = 'running'
+                    WHERE id = ANY(%s)
+                """, (ids,))
+
+    return jsonify([{"id": c["id"], "command_type": c["command_type"],
+                     "payload": c["payload"] or {}} for c in commands]), 200
+
+
+@app.route("/api/agent/commands/<int:cmd_id>/result", methods=["POST"])
+@require_agent
+def agent_post_command_result(agent, cmd_id):
+    data     = request.get_json(silent=True) or {}
+    output   = data.get("output")
+    exit_code = data.get("exit_code", 0)
+    error    = data.get("error")
+
+    result_json = {"output": output, "exit_code": exit_code, "error": error,
+                   "agent_hostname": agent["hostname"]}
+
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE agent_commands
+                SET status = 'completed', executed_at = now(), result = %s
+                WHERE id = %s
+            """, (psycopg2.extras.Json(result_json), cmd_id))
+
+    return jsonify({"ok": True}), 200
+
+
 @app.route("/api/download/agent", methods=["GET"])
 def download_agent():
     if not os.path.isfile(AGENT_BINARY_PATH):
@@ -994,6 +1047,117 @@ def client_ip_delete(client_id, ip_id):
                 (ip_id, client_id))
     flash("IP smazana.", "ok")
     return redirect(url_for("client_detail", client_id=client_id))
+
+# ============================================================
+# Commands
+# ============================================================
+
+@app.route("/commands")
+def commands_list():
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                SELECT ac.*,
+                       a.hostname  AS agent_hostname,
+                       ag.nazev   AS group_name,
+                       c.nazev    AS client_name
+                FROM agent_commands ac
+                LEFT JOIN agents       a  ON ac.agent_id  = a.id
+                LEFT JOIN agent_groups ag ON ac.group_id  = ag.id
+                LEFT JOIN clients      c  ON ac.client_id = c.id
+                ORDER BY ac.created_at DESC
+                LIMIT 200
+            """)
+            commands = cur.fetchall()
+
+            cur.execute("SELECT id, hostname FROM agents WHERE aktivni = true ORDER BY hostname")
+            agents = cur.fetchall()
+            cur.execute("SELECT id, nazev FROM agent_groups ORDER BY nazev")
+            groups = cur.fetchall()
+            cur.execute("SELECT id, nazev FROM clients ORDER BY nazev")
+            clients = cur.fetchall()
+
+    return render_template("commands.html",
+                           commands=commands, agents=agents,
+                           groups=groups, clients=clients)
+
+
+@app.route("/commands/add", methods=["POST"])
+def command_add():
+    command_type = request.form.get("command_type", "powershell")
+    if command_type not in ("powershell", "cmd"):
+        flash("Neplatny typ prikazu.", "error")
+        return redirect(url_for("commands_list"))
+
+    script      = request.form.get("script", "").strip()
+    timeout_sec = request.form.get("timeout_sec", "60").strip()
+    if not script:
+        flash("Script je povinny.", "error")
+        return redirect(url_for("commands_list"))
+
+    try:
+        t = int(timeout_sec)
+        t = max(5, min(3600, t))
+    except ValueError:
+        t = 60
+
+    payload = {"script": script, "timeout_sec": t}
+
+    target_type = request.form.get("target_type", "agent")
+    agent_id = group_id = client_id = None
+    target_all = False
+
+    if target_type == "agent":
+        try:
+            agent_id = int(request.form.get("target_agent_id", ""))
+        except (ValueError, TypeError):
+            flash("Vyberte agenta.", "error")
+            return redirect(url_for("commands_list"))
+    elif target_type == "group":
+        try:
+            group_id = int(request.form.get("target_group_id", ""))
+        except (ValueError, TypeError):
+            flash("Vyberte skupinu.", "error")
+            return redirect(url_for("commands_list"))
+    elif target_type == "client":
+        try:
+            client_id = int(request.form.get("target_client_id", ""))
+        except (ValueError, TypeError):
+            flash("Vyberte klienta.", "error")
+            return redirect(url_for("commands_list"))
+    elif target_type == "all":
+        target_all = True
+    else:
+        flash("Neplatny cil.", "error")
+        return redirect(url_for("commands_list"))
+
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO agent_commands
+                        (agent_id, group_id, client_id, target_all,
+                         command_type, payload, status)
+                    VALUES (%s, %s, %s, %s, %s, %s, 'pending')
+                """, (agent_id, group_id, client_id, target_all,
+                      command_type, psycopg2.extras.Json(payload)))
+        flash("Prikaz odeslán.", "ok")
+    except Exception as e:
+        flash(f"Chyba: {e}", "error")
+
+    return redirect(url_for("commands_list"))
+
+
+@app.route("/commands/<int:cmd_id>/cancel", methods=["POST"])
+def command_cancel(cmd_id):
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE agent_commands SET status = 'cancelled'
+                WHERE id = %s AND status = 'pending'
+            """, (cmd_id,))
+    flash("Prikaz zrusen.", "ok")
+    return redirect(url_for("commands_list"))
 
 # ============================================================
 

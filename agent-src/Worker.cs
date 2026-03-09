@@ -8,14 +8,17 @@ public class Worker : BackgroundService
     private readonly ApiClient _api;
     private readonly IEnumerable<IModule> _modules;
     private readonly ScriptModule _scriptModule;
+    private readonly CommandPoller _commandPoller;
     private readonly IConfiguration _config;
 
-    public Worker(ILogger<Worker> log, ApiClient api, IEnumerable<IModule> modules, ScriptModule scriptModule, IConfiguration config)
+    public Worker(ILogger<Worker> log, ApiClient api, IEnumerable<IModule> modules,
+                  ScriptModule scriptModule, CommandPoller commandPoller, IConfiguration config)
     {
         _log = log;
         _api = api;
         _modules = modules;
         _scriptModule = scriptModule;
+        _commandPoller = commandPoller;
         _config = config;
     }
 
@@ -57,6 +60,7 @@ public class Worker : BackgroundService
         }
 
         tasks.Add(HeartbeatLoopAsync(ct));
+        tasks.Add(_commandPoller.RunAsync(ct));
         await Task.WhenAll(tasks);
     }
 

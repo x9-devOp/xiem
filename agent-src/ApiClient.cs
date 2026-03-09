@@ -96,4 +96,35 @@ public class ApiClient
         try { await _http.PostAsync("/api/agent/heartbeat", null, ct); }
         catch (Exception ex) { _log.LogWarning(ex, "Heartbeat failed"); }
     }
+
+    public async Task<List<AgentCommand>> GetCommandsAsync(CancellationToken ct)
+    {
+        SetToken();
+        try
+        {
+            var result = await _http.GetFromJsonAsync<List<AgentCommand>>("/api/agent/commands", JsonOpts, ct);
+            return result ?? new();
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "GetCommands failed");
+            return new();
+        }
+    }
+
+    public async Task PostCommandResultAsync(CommandResult result, CancellationToken ct)
+    {
+        SetToken();
+        try
+        {
+            var resp = await _http.PostAsJsonAsync(
+                $"/api/agent/commands/{result.CommandId}/result", result, JsonOpts, ct);
+            if (!resp.IsSuccessStatusCode)
+                _log.LogWarning("PostCommandResult {Id} returned {Status}", result.CommandId, resp.StatusCode);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "PostCommandResult {Id} failed", result.CommandId);
+        }
+    }
 }

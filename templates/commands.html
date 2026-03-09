@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% block title %} — Prikazy{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Prikazy</h1>
+  <p>Ad-hoc PowerShell / CMD prikazy na agenty. Panic v Fazi 4.</p>
+</div>
+
+<div class="card">
+  <div class="card-title">Novy prikaz</div>
+  <form method="POST" action="{{ url_for('command_add') }}">
+    <div class="form-row" style="margin-bottom:10px">
+      <div class="form-group">
+        <label>Typ</label>
+        <select name="command_type">
+          <option value="powershell">PowerShell</option>
+          <option value="cmd">CMD</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Cil</label>
+        <select name="target_type" id="tgt-type" onchange="updateTarget()">
+          <option value="agent">Konkretni agent</option>
+          <option value="group">Skupina</option>
+          <option value="client">Klient</option>
+          <option value="all">Vsichni agenti</option>
+        </select>
+      </div>
+      <div class="form-group" id="tgt-agent">
+        <label>Agent</label>
+        <select name="target_agent_id">
+          <option value="">— vyberte —</option>
+          {% for a in agents %}
+          <option value="{{ a.id }}">{{ a.hostname }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group" id="tgt-group" style="display:none">
+        <label>Skupina</label>
+        <select name="target_group_id">
+          <option value="">— vyberte —</option>
+          {% for g in groups %}
+          <option value="{{ g.id }}">{{ g.nazev }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group" id="tgt-client" style="display:none">
+        <label>Klient</label>
+        <select name="target_client_id">
+          <option value="">— vyberte —</option>
+          {% for c in clients %}
+          <option value="{{ c.id }}">{{ c.nazev }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Timeout (s)</label>
+        <input type="number" name="timeout_sec" value="60" min="5" max="3600"
+               style="width:80px">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:1">
+        <label>Script</label>
+        <textarea name="script" rows="3"
+                  placeholder="Get-Date&#10;Get-LocalUser | Select Name,Enabled | ConvertTo-Json"
+                  style="width:100%;font-family:monospace;font-size:12px;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text-hi);resize:vertical"></textarea>
+      </div>
+      <div style="display:flex;align-items:flex-end">
+        <button type="submit" class="btn btn-primary">&#9654; Odeslat</button>
+      </div>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-title">Audit log (poslednich 200)</div>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Cil</th>
+        <th>Typ</th>
+        <th>Status</th>
+        <th>Vytvoreno</th>
+        <th>Provedeno</th>
+        <th>Vysledek / Akce</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for cmd in commands %}
+      <tr>
+        <td class="mono" style="color:var(--muted)">{{ cmd.id }}</td>
+        <td style="font-size:12px">
+          {% if cmd.target_all %}
+            <span class="badge badge-warn">vsichni</span>
+          {% elif cmd.agent_hostname %}
+            <span class="mono" style="color:var(--text-hi)">{{ cmd.agent_hostname }}</span>
+          {% elif cmd.group_name %}
+            <span class="badge badge-off">skupina: {{ cmd.group_name }}</span>
+          {% elif cmd.client_name %}
+            <span class="badge badge-off">klient: {{ cmd.client_name }}</span>
+          {% else %}
+            <span style="color:var(--muted)">—</span>
+          {% endif %}
+        </td>
+        <td><span class="badge badge-off">{{ cmd.command_type }}</span></td>
+        <td>
+          {% if cmd.status == 'completed' %}
+            <span class="badge badge-on">done</span>
+          {% elif cmd.status == 'running' %}
+            <span class="badge badge-warn">running</span>
+          {% elif cmd.status == 'pending' %}
+            <span class="badge badge-off">pending</span>
+          {% elif cmd.status == 'cancelled' %}
+            <span class="badge" style="background:rgba(90,96,112,0.2);color:var(--muted)">zruseno</span>
+          {% else %}
+            <span class="badge badge-err">{{ cmd.status }}</span>
+          {% endif %}
+        </td>
+        <td class="mono" style="color:var(--muted);font-size:11px">
+          {{ cmd.created_at.strftime('%m-%d %H:%M') if cmd.created_at else '—' }}
+        </td>
+        <td class="mono" style="color:var(--muted);font-size:11px">
+          {{ cmd.executed_at.strftime('%m-%d %H:%M') if cmd.executed_at else '—' }}
+        </td>
+        <td style="max-width:320px">
+          {% if cmd.result %}
+            {% set res = cmd.result %}
+            {% if res.error %}
+              <span class="mono" style="color:var(--danger);font-size:11px">ERR: {{ res.error[:120] }}</span>
+            {% elif res.output %}
+              <details style="cursor:pointer">
+                <summary style="font-size:11px;color:var(--accent);outline:none">
+                  exit={{ res.exit_code }} · {{ res.output | length }} znaku
+                </summary>
+                <pre style="margin-top:8px;padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:4px;font-size:11px;color:var(--text);white-space:pre-wrap;max-height:300px;overflow-y:auto">{{ res.output[:4000] }}</pre>
+              </details>
+            {% else %}
+              <span class="mono" style="color:var(--muted);font-size:11px">exit={{ res.exit_code }}</span>
+            {% endif %}
+          {% elif cmd.status == 'pending' %}
+            <form class="inline" method="POST"
+                  action="{{ url_for('command_cancel', cmd_id=cmd.id) }}">
+              <button class="btn btn-ghost btn-sm">✕ Zrusit</button>
+            </form>
+          {% else %}
+            <span style="color:var(--muted);font-size:12px">—</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" style="color:var(--muted);text-align:center;padding:24px">Zadne prikazy.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+function updateTarget() {
+  var t = document.getElementById('tgt-type').value;
+  document.getElementById('tgt-agent').style.display  = (t === 'agent')  ? 'flex' : 'none';
+  document.getElementById('tgt-group').style.display  = (t === 'group')  ? 'flex' : 'none';
+  document.getElementById('tgt-client').style.display = (t === 'client') ? 'flex' : 'none';
+}
+updateTarget();
+</script>
+{% endblock %}
