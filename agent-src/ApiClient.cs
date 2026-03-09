@@ -44,8 +44,8 @@ public class ApiClient
             InstallSecret = _config["Xiem:InstallSecret"] ?? "",
             Hostname      = Environment.MachineName,
             Fqdn          = ResolveFqdn(),
-            Group         = _config["Xiem:Group"] ?? "rds",
-            AgentVersion  = "1.1.0"
+            Group         = _config["Xiem:Group"] ?? "",
+            AgentVersion  = "2.0.0"
         };
         try
         {

@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %} — Skupiny{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Skupiny</h1>
+  <p>Konfigurace modulu per skupina agentu</p>
+</div>
+
+{% for group in groups %}
+<div class="card">
+  <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+    <span>⊞ {{ group.nazev }}</span>
+    <span style="font-weight:400;color:var(--muted)">{{ group.agent_count }} aktivnich agentu</span>
+  </div>
+
+  {% set group_modules = modules_by_group.get(group.id, []) %}
+  {% if group_modules %}
+  <div style="display:grid;grid-template-columns:160px 120px 120px 90px 80px;gap:0;font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.8px;padding:0 0 8px 0;border-bottom:1px solid var(--border);margin-bottom:4px">
+    <span>Modul</span><span>Typ</span><span>Interval</span><span>Status</span><span></span>
+  </div>
+  {% for m in group_modules %}
+  <form method="POST" action="{{ url_for('group_module_update', group_id=group.id, module_name=m.modul) }}">
+    <div style="display:grid;grid-template-columns:160px 120px 120px 90px 80px;gap:0;align-items:center;padding:8px 0;border-bottom:1px solid rgba(37,42,53,0.4)">
+      <span class="mono" style="color:var(--text-hi)">{{ m.modul }}</span>
+      <span>
+        <select name="module_type" style="width:110px;padding:4px 8px;font-size:11px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text-hi)">
+          <option value="native"     {% if m.module_type == 'native' %}selected{% endif %}>native (C#)</option>
+          <option value="powershell" {% if m.module_type == 'powershell' %}selected{% endif %}>powershell</option>
+          <option value="cmd"        {% if m.module_type == 'cmd' %}selected{% endif %}>cmd</option>
+        </select>
+      </span>
+      <span style="display:flex;align-items:center;gap:4px">
+        <input type="number" name="interval_sec" value="{{ m.interval_sec }}"
+               min="60" max="86400" style="width:72px;padding:4px 8px;font-size:11px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text-hi)">
+        <span style="color:var(--muted);font-size:11px">s</span>
+      </span>
+      <span>
+        <input type="hidden" name="enabled" value="0">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px">
+          <input type="checkbox" name="enabled" value="1" {% if m.enabled %}checked{% endif %}
+                 style="accent-color:var(--accent)">
+          <span style="color:{% if m.enabled %}var(--accent){% else %}var(--muted){% endif %}">
+            {% if m.enabled %}on{% else %}off{% endif %}
+          </span>
+        </label>
+      </span>
+      <span>
+        <button type="submit" class="btn btn-primary btn-sm">Ulozit</button>
+      </span>
+    </div>
+  </form>
+  {% endfor %}
+  {% else %}
+  <p style="color:var(--muted);font-size:13px">Zadne moduly konfigurovany pro tuto skupinu.</p>
+  {% endif %}
+</div>
+{% else %}
+<div class="card">
+  <p style="color:var(--muted);text-align:center;padding:24px">Zadne skupiny.</p>
+</div>
+{% endfor %}
+{% endblock %}

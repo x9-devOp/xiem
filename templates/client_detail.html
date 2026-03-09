@@ -11,82 +11,90 @@
   <p>{{ client.poznamka or 'Bez poznamky' }}</p>
 </div>
 
+<!-- Agents assigned to this client -->
 <div class="card">
-  <div class="card-title">Pridat whitelist zaznam</div>
-  <form method="POST" action="{{ url_for('client_whitelist_add', client_id=client.id) }}">
-    <div class="form-row">
-      <div class="form-group">
-        <label>Zaznam</label>
-        <input type="text" name="zaznam" placeholder="1.2.3.4 nebo firma.cz nebo *.firma.cz" required>
-      </div>
-      <div class="form-group">
-        <label>Typ</label>
-        <select name="list_type">
-          <option value="ip">IP / CIDR</option>
-          <option value="fqdn">FQDN</option>
-          <option value="url">URL</option>
-        </select>
-      </div>
-      <div class="form-group" style="flex:1">
-        <label>Poznamka</label>
-        <input type="text" name="poznamka" placeholder="proc je tato adresa povolena...">
-      </div>
-      <button type="submit" class="btn btn-primary">+ Pridat</button>
-    </div>
-  </form>
-</div>
-
-<div class="card">
-  <div class="card-title">Whitelist zaznamy ({{ entries | length }})</div>
+  <div class="card-title">Agenti ({{ agents | length }})</div>
+  {% if agents %}
   <table>
     <thead>
       <tr>
-        <th>Zaznam</th>
-        <th>Typ</th>
-        <th>Poznamka</th>
-        <th>Pridano</th>
-        <th>Status</th>
-        <th>Akce</th>
+        <th>Hostname</th>
+        <th>FQDN</th>
+        <th>Skupina</th>
+        <th>IP adresa</th>
+        <th>Verze</th>
+        <th>Posledni kontakt</th>
       </tr>
     </thead>
     <tbody>
-      {% for e in entries %}
+      {% for a in agents %}
       <tr>
-        <td class="mono" style="color:var(--text-hi)">{{ e.zaznam }}</td>
-        <td><span class="badge badge-{{ e.list_type }}">{{ e.list_type }}</span></td>
-        <td style="color:var(--muted);font-size:12px">{{ e.poznamka or '—' }}</td>
-        <td class="mono">{{ e.vytvoreno.strftime('%Y-%m-%d') if e.vytvoreno else '—' }}</td>
-        <td>
-          {% if e.enabled %}
-            <span class="badge badge-on">aktivni</span>
-          {% else %}
-            <span class="badge badge-off">vypnuto</span>
-          {% endif %}
-        </td>
-        <td>
-          <div style="display:flex;gap:6px">
-            <form class="inline" method="POST"
-                  action="{{ url_for('client_whitelist_toggle', client_id=client.id, entry_id=e.id) }}">
-              <button class="btn btn-ghost btn-sm">{{ '⏸ Vypnout' if e.enabled else '▶ Zapnout' }}</button>
-            </form>
-            <form class="inline" method="POST"
-                  action="{{ url_for('client_whitelist_delete', client_id=client.id, entry_id=e.id) }}"
-                  onsubmit="return confirm('Smazat zaznam?')">
-              <button class="btn btn-danger btn-sm">✕</button>
-            </form>
-          </div>
-        </td>
+        <td class="mono" style="color:var(--text-hi)">{{ a.hostname }}</td>
+        <td class="mono" style="color:var(--muted)">{{ a.fqdn or '—' }}</td>
+        <td><span class="badge badge-off">{{ a.group_name or '—' }}</span></td>
+        <td class="mono">{{ a.ip_adresa or '—' }}</td>
+        <td class="mono" style="color:var(--muted)">{{ a.verze_agenta or '—' }}</td>
+        <td class="mono">{{ a.posledni_kontakt.strftime('%Y-%m-%d %H:%M') if a.posledni_kontakt else '—' }}</td>
       </tr>
-      {% else %}
-      <tr><td colspan="6" style="color:var(--muted);text-align:center;padding:24px">Zadne whitelist zaznamy.</td></tr>
       {% endfor %}
     </tbody>
   </table>
+  {% else %}
+  <p style="color:var(--muted);font-size:13px">Zadni agenti prirazeni k tomuto klientovi. Priradeni provedte na strance <a href="{{ url_for('agents_list') }}" style="color:var(--accent)">Agenti</a>.</p>
+  {% endif %}
 </div>
 
+<!-- IP restriction -->
+<div class="card">
+  <div class="card-title">IP Restriction
+    <span style="font-weight:400;color:var(--muted);font-size:11px;margin-left:8px">
+      {% if ips %}— agenti tohoto klienta smejí volat API pouze z techto IP{% else %}— bez omezeni (zadne IP zadany){% endif %}
+    </span>
+  </div>
+  <form method="POST" action="{{ url_for('client_ip_add', client_id=client.id) }}" style="margin-bottom:16px">
+    <div class="form-row">
+      <div class="form-group">
+        <label>IP / CIDR</label>
+        <input type="text" name="ip_cidr" placeholder="1.2.3.4 nebo 1.2.3.0/24" required style="min-width:200px">
+      </div>
+      <div class="form-group" style="flex:1">
+        <label>Poznamka</label>
+        <input type="text" name="popis" placeholder="napr. hlavni kancelár">
+      </div>
+      <button type="submit" class="btn btn-primary">+ Pridat IP</button>
+    </div>
+  </form>
+  {% if ips %}
+  <table>
+    <thead>
+      <tr><th>IP / CIDR</th><th>Poznamka</th><th>Pridano</th><th>Akce</th></tr>
+    </thead>
+    <tbody>
+      {% for ip in ips %}
+      <tr>
+        <td class="mono" style="color:var(--accent)">{{ ip.ip_cidr }}</td>
+        <td style="color:var(--muted);font-size:12px">{{ ip.popis or '—' }}</td>
+        <td class="mono">{{ ip.vytvoreno.strftime('%Y-%m-%d') if ip.vytvoreno else '—' }}</td>
+        <td>
+          <form class="inline" method="POST"
+                action="{{ url_for('client_ip_delete', client_id=client.id, ip_id=ip.id) }}"
+                onsubmit="return confirm('Smazat IP {{ ip.ip_cidr }}?')">
+            <button class="btn btn-danger btn-sm">✕</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:var(--muted);font-size:13px">Zadne IP zaznamy — agenti tohoto klienta mohou komunikovat z libovolne IP.</p>
+  {% endif %}
+</div>
+
+<!-- Output lists assigned to this client -->
 {% if client_lists %}
 <div class="card">
-  <div class="card-title">Listy tohoto klienta</div>
+  <div class="card-title">Vystupni listy tohoto klienta</div>
   <table>
     <thead>
       <tr><th>Nazev</th><th>Typ</th><th>Status</th><th></th></tr>

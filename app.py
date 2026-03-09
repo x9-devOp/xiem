@@ -142,14 +142,15 @@ def agent_config(agent):
     with get_db() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
-                SELECT modul AS name, enabled, 3600 AS interval_sec, parametry AS params
+                SELECT modul AS name, enabled, interval_sec, module_type, parametry AS params
                 FROM agent_module_config
                 WHERE group_id = %s ORDER BY modul
             """, (agent["group_id"],))
             modules = [{"name": r["name"], "enabled": r["enabled"],
-                        "interval_sec": r["interval_sec"], "params": r["params"] or {}}
+                        "interval_sec": r["interval_sec"], "module_type": r["module_type"],
+                        "params": r["params"] or {}}
                        for r in cur.fetchall()]
-    return jsonify({"interval_sec": 3600, "modules": modules}), 200
+    return jsonify({"modules": modules}), 200
 
 
 @app.route("/api/agent/ingest", methods=["POST"])
@@ -504,13 +505,16 @@ def agents_list():
     with get_db() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
-                SELECT a.*, ag.nazev AS group_name
+                SELECT a.*, ag.nazev AS group_name, c.nazev AS client_name
                 FROM agents a
                 LEFT JOIN agent_groups ag ON a.group_id = ag.id
+                LEFT JOIN clients c ON a.client_id = c.id
                 ORDER BY a.hostname
             """)
             agents = cur.fetchall()
-    return render_template("agents.html", agents=agents, now=now)
+            cur.execute("SELECT id, nazev FROM clients ORDER BY nazev")
+            clients = cur.fetchall()
+    return render_template("agents.html", agents=agents, now=now, clients=clients)
 
 
 @app.route("/agents/<int:agent_id>/toggle", methods=["POST"])
@@ -520,6 +524,67 @@ def agent_toggle(agent_id):
             cur.execute("UPDATE agents SET aktivni = NOT aktivni WHERE id = %s",
                         (agent_id,))
     return redirect(url_for("agents_list"))
+
+
+@app.route("/agents/<int:agent_id>/assign-client", methods=["POST"])
+def agent_assign_client(agent_id):
+    client_id = request.form.get("client_id") or None
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents SET client_id = %s WHERE id = %s",
+                (int(client_id) if client_id else None, agent_id))
+    return redirect(url_for("agents_list"))
+
+# ============================================================
+# Groups & Module Config
+# ============================================================
+
+@app.route("/groups")
+def groups_list():
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                SELECT ag.id, ag.nazev,
+                       COUNT(a.id) AS agent_count
+                FROM agent_groups ag
+                LEFT JOIN agents a ON a.group_id = ag.id AND a.aktivni = true
+                GROUP BY ag.id, ag.nazev
+                ORDER BY ag.nazev
+            """)
+            groups = cur.fetchall()
+
+            cur.execute("SELECT * FROM agent_module_config ORDER BY group_id, modul")
+            all_modules = cur.fetchall()
+
+    modules_by_group = {}
+    for m in all_modules:
+        modules_by_group.setdefault(m["group_id"], []).append(dict(m))
+
+    return render_template("groups.html", groups=groups, modules_by_group=modules_by_group)
+
+
+@app.route("/groups/<int:group_id>/modules/<module_name>/update", methods=["POST"])
+def group_module_update(group_id, module_name):
+    enabled = request.form.get("enabled") == "1"
+    try:
+        interval_sec = int(request.form.get("interval_sec", 3600))
+        interval_sec = max(60, min(86400, interval_sec))
+    except ValueError:
+        interval_sec = 3600
+    module_type = request.form.get("module_type", "native")
+    if module_type not in ("native", "powershell", "cmd"):
+        module_type = "native"
+
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE agent_module_config
+                SET enabled = %s, interval_sec = %s, module_type = %s
+                WHERE group_id = %s AND modul = %s
+            """, (enabled, interval_sec, module_type, group_id, module_name))
+    flash(f"Modul {module_name} aktualizovan.", "ok")
+    return redirect(url_for("groups_list"))
 
 # ============================================================
 # Output Lists
@@ -757,8 +822,10 @@ def clients_list():
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
                 SELECT c.*,
-                       (SELECT COUNT(*) FROM whitelist_entries we
-                        WHERE we.client_id = c.id AND we.enabled = true) AS whitelist_count,
+                       (SELECT COUNT(*) FROM agents a
+                        WHERE a.client_id = c.id AND a.aktivni = true) AS agent_count,
+                       (SELECT COUNT(*) FROM client_ips ci
+                        WHERE ci.client_id = c.id) AS ip_count,
                        (SELECT COUNT(*) FROM output_lists ol
                         WHERE ol.client_id = c.id) AS list_count
                 FROM clients c
@@ -811,10 +878,18 @@ def client_detail(client_id):
                 abort(404)
 
             cur.execute("""
-                SELECT * FROM whitelist_entries
-                WHERE client_id = %s ORDER BY vytvoreno DESC
+                SELECT a.*, ag.nazev AS group_name
+                FROM agents a
+                LEFT JOIN agent_groups ag ON a.group_id = ag.id
+                WHERE a.client_id = %s
+                ORDER BY a.hostname
             """, (client_id,))
-            entries = cur.fetchall()
+            agents = cur.fetchall()
+
+            cur.execute("""
+                SELECT * FROM client_ips WHERE client_id = %s ORDER BY vytvoreno
+            """, (client_id,))
+            ips = cur.fetchall()
 
             cur.execute("""
                 SELECT id, nazev, list_type, enabled
@@ -823,59 +898,43 @@ def client_detail(client_id):
             client_lists = cur.fetchall()
 
     return render_template("client_detail.html",
-                           client=client, entries=entries, client_lists=client_lists)
+                           client=client, agents=agents, ips=ips, client_lists=client_lists)
 
 
-@app.route("/clients/<int:client_id>/whitelist/add", methods=["POST"])
-def client_whitelist_add(client_id):
-    zaznam    = request.form.get("zaznam", "").strip()
-    list_type = request.form.get("list_type", "ip")
-    poznamka  = request.form.get("poznamka", "").strip()
+@app.route("/clients/<int:client_id>/ips/add", methods=["POST"])
+def client_ip_add(client_id):
+    ip_cidr  = request.form.get("ip_cidr", "").strip()
+    popis    = request.form.get("popis", "").strip()
 
-    if not zaznam:
-        flash("Zaznam je povinny.", "error")
-        return redirect(url_for("client_detail", client_id=client_id))
-
-    if list_type not in ("ip", "fqdn", "url"):
-        list_type = "ip"
-
-    if not validate_zaznam(zaznam, list_type):
-        flash(f"Neplatny zaznam pro typ '{list_type}': {zaznam}", "error")
+    try:
+        ipaddress.ip_network(ip_cidr, strict=False)
+    except ValueError:
+        flash(f"Neplatna IP/CIDR: {ip_cidr}", "error")
         return redirect(url_for("client_detail", client_id=client_id))
 
     try:
         with get_db() as conn:
             with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO whitelist_entries (client_id, zaznam, list_type, poznamka)
-                    VALUES (%s, %s, %s, %s)
-                """, (client_id, zaznam, list_type, poznamka or None))
-        flash(f"Whitelist zaznam {zaznam} pridan.", "ok")
+                cur.execute(
+                    "INSERT INTO client_ips (client_id, ip_cidr, popis) VALUES (%s, %s, %s)",
+                    (client_id, ip_cidr, popis or None))
+        flash(f"IP {ip_cidr} pridana.", "ok")
+    except psycopg2.errors.UniqueViolation:
+        flash("Tato IP/CIDR uz je u klienta ulozena.", "error")
     except Exception as e:
         flash(f"Chyba: {e}", "error")
 
     return redirect(url_for("client_detail", client_id=client_id))
 
 
-@app.route("/clients/<int:client_id>/whitelist/<int:entry_id>/toggle", methods=["POST"])
-def client_whitelist_toggle(client_id, entry_id):
+@app.route("/clients/<int:client_id>/ips/<int:ip_id>/delete", methods=["POST"])
+def client_ip_delete(client_id, ip_id):
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "UPDATE whitelist_entries SET enabled = NOT enabled "
-                "WHERE id = %s AND client_id = %s",
-                (entry_id, client_id))
-    return redirect(url_for("client_detail", client_id=client_id))
-
-
-@app.route("/clients/<int:client_id>/whitelist/<int:entry_id>/delete", methods=["POST"])
-def client_whitelist_delete(client_id, entry_id):
-    with get_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "DELETE FROM whitelist_entries WHERE id = %s AND client_id = %s",
-                (entry_id, client_id))
-    flash("Zaznam smazan.", "ok")
+                "DELETE FROM client_ips WHERE id = %s AND client_id = %s",
+                (ip_id, client_id))
+    flash("IP smazana.", "ok")
     return redirect(url_for("client_detail", client_id=client_id))
 
 # ============================================================

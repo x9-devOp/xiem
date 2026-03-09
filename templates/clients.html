@@ -4,7 +4,7 @@
 {% block content %}
 <div class="page-header">
   <h1>Klienti</h1>
-  <p>Sprava klientu a jejich whitelistu</p>
+  <p>Sprava klientu MSP a jejich agentu</p>
 </div>
 
 <div class="card">
@@ -32,7 +32,8 @@
       <tr>
         <th>Nazev</th>
         <th>Poznamka</th>
-        <th>Whitelisty</th>
+        <th>Agenti</th>
+        <th>IP restriction</th>
         <th>Listy</th>
         <th>Vytvoreno</th>
         <th>Akce</th>
@@ -41,23 +42,28 @@
     <tbody>
       {% for c in clients %}
       <tr>
-        <td style="color:var(--text-hi);font-weight:600">{{ c.nazev }}</td>
+        <td style="color:var(--text-hi);font-weight:600">
+          <a href="{{ url_for('client_detail', client_id=c.id) }}" style="color:var(--text-hi);text-decoration:none">{{ c.nazev }}</a>
+        </td>
         <td style="color:var(--muted);font-size:12px">{{ c.poznamka or '—' }}</td>
-        <td class="mono" style="color:var(--accent)">{{ c.whitelist_count }}</td>
+        <td class="mono" style="color:var(--accent)">{{ c.agent_count }}</td>
+        <td class="mono" style="color:{{ 'var(--accent2)' if c.ip_count > 0 else 'var(--muted)' }}">
+          {{ c.ip_count }} IP{% if c.ip_count == 0 %} <span style="font-size:11px;color:var(--muted)">(neomezeno)</span>{% endif %}
+        </td>
         <td class="mono" style="color:var(--muted)">{{ c.list_count }}</td>
         <td class="mono">{{ c.vytvoreno.strftime('%Y-%m-%d') if c.vytvoreno else '—' }}</td>
         <td>
           <div style="display:flex;gap:6px">
-            <a href="{{ url_for('client_detail', client_id=c.id) }}" class="btn btn-ghost btn-sm">⚙ Whitelist</a>
+            <a href="{{ url_for('client_detail', client_id=c.id) }}" class="btn btn-ghost btn-sm">⚙ Detail</a>
             <form class="inline" method="POST" action="{{ url_for('client_delete', client_id=c.id) }}"
-                  onsubmit="return confirm('Smazat klienta {{ c.nazev }} a vsechny jeho whitelisty?')">
+                  onsubmit="return confirm('Smazat klienta {{ c.nazev }}?')">
               <button class="btn btn-danger btn-sm">✕</button>
             </form>
           </div>
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="6" style="color:var(--muted);text-align:center;padding:24px">Zadni klienti.</td></tr>
+      <tr><td colspan="7" style="color:var(--muted);text-align:center;padding:24px">Zadni klienti.</td></tr>
       {% endfor %}
     </tbody>
   </table>
