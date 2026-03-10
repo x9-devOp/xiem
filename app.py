@@ -966,6 +966,113 @@ def list_delete(list_id):
     return redirect(url_for("lists_list"))
 
 
+_LIST_EXPLAIN_CACHE: dict[int, dict] = {}
+_LIST_EXPLAIN_TTL = 3600  # 1 hour
+
+
+@app.route("/lists/<int:list_id>/explain")
+def list_explain(list_id):
+    import anthropic as _anthropic
+    cache = _LIST_EXPLAIN_CACHE.get(list_id, {})
+    if cache.get("ts", 0) + _LIST_EXPLAIN_TTL > _time.time():
+        return jsonify({"content": cache["content"]})
+
+    if not ANTHROPIC_API_KEY:
+        return jsonify({"error": "ANTHROPIC_API_KEY neni nastaven"}), 503
+
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT * FROM output_lists WHERE id = %s", (list_id,))
+            lst = cur.fetchone()
+            if not lst:
+                return jsonify({"error": "List nenalezen"}), 404
+
+            cur.execute("""
+                SELECT ols.source_type, ols.source_id, ols.enabled, ols.parametry,
+                       uf.nazev AS feed_name, uf.vaha AS feed_vaha, uf.pocet_zaznamu AS feed_count
+                FROM output_list_sources ols
+                LEFT JOIN upstream_feeds uf ON ols.source_id = uf.id
+                WHERE ols.list_id = %s ORDER BY ols.source_type, ols.id
+            """, (list_id,))
+            sources = cur.fetchall()
+
+            cur.execute("""
+                SELECT COUNT(*) AS auth_total,
+                       COUNT(*) FILTER (WHERE importtime >= NOW()-INTERVAL '24h') AS auth_24h,
+                       COUNT(*) FILTER (WHERE importtime >= NOW()-INTERVAL '7 days') AS auth_7d
+                FROM auth_failures
+            """)
+            af_stats = cur.fetchone()
+
+            cur.execute("""
+                SELECT COUNT(*) AS eset_total,
+                       COUNT(*) FILTER (WHERE importtime >= NOW()-INTERVAL '24h') AS eset_24h
+                FROM eset_network_blocks
+            """)
+            eset_stats = cur.fetchone()
+
+    # Build context for Claude
+    src_lines = []
+    for s in sources:
+        p = s["parametry"] or {}
+        if s["source_type"] == "upstream_feed":
+            src_lines.append(
+                f"- upstream_feed '{s['feed_name']}': {s['feed_count']} entries, "
+                f"feed_vaha={s['feed_vaha']}, param_vaha={p.get('vaha','default')}, "
+                f"decay_lambda={p.get('decay_lambda', 0.05)}, window_days={p.get('window_days', 120)}, "
+                f"enabled={s['enabled']}"
+            )
+        else:
+            src_lines.append(
+                f"- {s['source_type']}: vaha={p.get('vaha', 'default(1.0)')}, "
+                f"decay_lambda={p.get('decay_lambda', 0.05)}, "
+                f"window_days={p.get('window_days', 120)}, enabled={s['enabled']}"
+            )
+
+    context = f"""
+Output list: {lst['nazev']} (type={lst['list_type']}, interval_min={lst['interval_min']})
+Last generated: {lst['last_generated']}
+Threshold: 3.0 (default, can be overridden per source via threshold_override)
+
+Sources:
+{chr(10).join(src_lines) if src_lines else '(none)'}
+
+Scoring formula: score(ip) = sum over sources: vaha * exp(-decay_lambda * age_days)
+IP is included if score >= threshold.
+/24 aggregation: if >= 3 IPs from same /24 block, aggregate to /24 CIDR.
+manual_block IPs always score 10.0 (above any threshold).
+
+Current data in DB:
+- auth_failures total: {af_stats['auth_total']}, last 24h: {af_stats['auth_24h']}, last 7d: {af_stats['auth_7d']}
+- eset_network_blocks total: {eset_stats['eset_total']}, last 24h: {eset_stats['eset_24h']}
+
+DEFAULT_WEIGHT constant in code = 1.0 (used when 'vaha' not set in parametry)
+"""
+
+    try:
+        client = _anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        msg = client.messages.create(
+            model="claude-opus-4-6",
+            max_tokens=1200,
+            system=(
+                "You are a security engineer reviewing a blocklist generation algorithm "
+                "for an MSP company managing ~100 Windows servers. "
+                "Explain the algorithm in Czech in plain, human-readable language. "
+                "Cover: what the list does, how scoring works in practice "
+                "(give concrete examples: 'IP s 3 dnesnimi auth failures dostane score X'), "
+                "how long an IP stays in the list (half-life), "
+                "and any potential issues or improvements. "
+                "Use Markdown. Be concise and practical."
+            ),
+            messages=[{"role": "user", "content": context}],
+        )
+        content = msg.content[0].text
+        _LIST_EXPLAIN_CACHE[list_id] = {"ts": _time.time(), "content": content}
+        return jsonify({"content": content})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/lists/<int:list_id>")
 def list_detail(list_id):
     with get_db() as conn:

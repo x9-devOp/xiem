@@ -31,6 +31,18 @@
   </div>
 </div>
 
+<div class="card" id="ai-explain-card">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+    <div class="card-title" style="margin-bottom:0">&#10022; AI: Jak funguje tento list?</div>
+    <button class="btn btn-ghost btn-sm" id="ai-explain-btn" onclick="loadExplain()">Vysvetlit</button>
+  </div>
+  <div id="ai-explain-body" style="display:none">
+    <div id="ai-explain-loading" style="color:var(--muted);font-size:13px">Generuji vysvetleni...</div>
+    <div id="ai-explain-content" class="markdown-body" style="display:none"></div>
+    <div id="ai-explain-error" style="display:none;color:var(--danger);font-size:13px"></div>
+  </div>
+</div>
+
 <div class="card">
   <div class="card-title">Pridat zdroj</div>
   <form method="POST" action="{{ url_for('list_source_add', list_id=lst.id) }}">
@@ -165,7 +177,50 @@
   </table>
 </div>
 
+<style>
+  .markdown-body { font-size:13px; line-height:1.65; color:var(--text); }
+  .markdown-body h2,.markdown-body h3 { font-size:13px; font-weight:600; color:var(--text-hi); margin:14px 0 6px; }
+  .markdown-body h2 { border-bottom:1px solid var(--border); padding-bottom:4px; }
+  .markdown-body p { margin:5px 0; }
+  .markdown-body ul,.markdown-body ol { padding-left:18px; margin:5px 0; }
+  .markdown-body li { margin:2px 0; }
+  .markdown-body code { font-family:'IBM Plex Mono',monospace; font-size:11px; background:rgba(255,255,255,0.06); padding:1px 4px; border-radius:3px; }
+  .markdown-body strong { color:var(--text-hi); }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script>
+var _explainLoaded = false;
+function loadExplain() {
+  var card  = document.getElementById('ai-explain-body');
+  var btn   = document.getElementById('ai-explain-btn');
+  if (_explainLoaded) { card.style.display = card.style.display === 'none' ? '' : 'none'; return; }
+  card.style.display = '';
+  btn.textContent = 'Nacitam...';
+  btn.disabled = true;
+  fetch('{{ url_for("list_explain", list_id=lst.id) }}')
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      document.getElementById('ai-explain-loading').style.display = 'none';
+      if (d.error) {
+        var el = document.getElementById('ai-explain-error');
+        el.textContent = d.error; el.style.display = '';
+      } else {
+        var el = document.getElementById('ai-explain-content');
+        el.innerHTML = marked.parse(d.content); el.style.display = '';
+      }
+      btn.textContent = 'Skryt';
+      btn.disabled = false;
+      _explainLoaded = true;
+    })
+    .catch(function(e){
+      document.getElementById('ai-explain-loading').style.display = 'none';
+      var el = document.getElementById('ai-explain-error');
+      el.textContent = 'Chyba: ' + e; el.style.display = '';
+      btn.textContent = 'Vysvetlit';
+      btn.disabled = false;
+    });
+}
+
 function updateSourceId() {
   var t = document.getElementById('src-type').value;
   document.getElementById('src-feed-group').style.display =
