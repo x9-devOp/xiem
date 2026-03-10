@@ -8,11 +8,11 @@
 </div>
 
 <div class="card">
-  <table>
+  <table id="agents-table">
     <thead>
       <tr>
         <th>Hostname</th>
-        <th>FQDN</th>
+        <th>FQDN / Domena</th>
         <th>Skupina</th>
         <th>Klient</th>
         <th>IP adresa</th>
@@ -25,23 +25,25 @@
     <tbody>
       {% for a in agents %}
       <tr>
-        <td class="mono">
+        <td class="mono" data-sort="{{ a.hostname }}">
           <a href="{{ url_for('agent_detail', agent_id=a.id) }}"
              style="color:var(--text-hi);text-decoration:none;font-weight:600">{{ a.hostname }}</a>
         </td>
-        <td class="mono" style="color:var(--muted)">{{ a.fqdn or '—' }}</td>
-        <td><span class="badge badge-off">{{ a.group_name or '—' }}</span></td>
-        <td style="font-size:12px">
+        <td class="mono" style="color:var(--muted)" data-sort="{{ a.fqdn or '' }}">{{ a.fqdn or '—' }}</td>
+        <td data-sort="{{ a.group_name or '' }}"><span class="badge badge-off">{{ a.group_name or '—' }}</span></td>
+        <td style="font-size:12px" data-sort="{{ a.client_name or '' }}">
           {% if a.client_name %}
             <a href="{{ url_for('client_detail', client_id=a.client_id) }}" style="color:var(--accent);text-decoration:none">{{ a.client_name }}</a>
           {% else %}
             <span style="color:var(--muted)">—</span>
           {% endif %}
         </td>
-        <td class="mono">{{ a.ip_adresa or '—' }}</td>
-        <td class="mono" style="color:var(--muted)">{{ a.verze_agenta or '—' }}</td>
-        <td class="mono"><span data-utc="{{ a.posledni_kontakt.isoformat() if a.posledni_kontakt else '' }}">{{ a.posledni_kontakt.strftime('%Y-%m-%d %H:%M') if a.posledni_kontakt else '—' }}</span></td>
-        <td>
+        <td class="mono" data-sort="{{ a.ip_adresa or '' }}">{{ a.ip_adresa or '—' }}</td>
+        <td class="mono" style="color:var(--muted)" data-sort="{{ a.verze_agenta or '' }}">{{ a.verze_agenta or '—' }}</td>
+        <td class="mono" data-sort="{{ a.posledni_kontakt.isoformat() if a.posledni_kontakt else '' }}">
+          <span data-utc="{{ a.posledni_kontakt.isoformat() if a.posledni_kontakt else '' }}">{{ a.posledni_kontakt.strftime('%Y-%m-%d %H:%M') if a.posledni_kontakt else '—' }}</span>
+        </td>
+        <td data-sort="{% if not a.aktivni %}deaktivovan{% elif a.posledni_kontakt and (now - a.posledni_kontakt).total_seconds() < 3600 %}online{% else %}offline{% endif %}">
           {% if not a.aktivni %}
             <span class="badge badge-off">deaktivovan</span>
           {% elif a.posledni_kontakt and (now - a.posledni_kontakt).total_seconds() < 3600 %}
@@ -78,4 +80,20 @@
     </tbody>
   </table>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  xiemTable('agents-table', [
+    {sort: true,  filter: true,  group: true},               // Hostname
+    {sort: true,  filter: true,  group: true, domain: true}, // FQDN (group key = domain)
+    {sort: true,  filter: true,  group: true},               // Skupina
+    {sort: true,  filter: true,  group: true},               // Klient
+    {sort: true,  filter: true,  group: false},              // IP adresa
+    {sort: true,  filter: false, group: true},               // Verze
+    {sort: true,  filter: false, group: false},              // Posledni kontakt
+    {sort: true,  filter: false, group: true},               // Status
+    {sort: false, filter: false, group: false}               // Akce
+  ], {defaultGroupCol: 1});
+});
+</script>
 {% endblock %}

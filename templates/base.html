@@ -431,6 +431,234 @@
     if (v) el.textContent = v;
   });
 })();
+
+/* -------------------------------------------------------
+ * xiemTable(tableId, colDefs, opts)
+ * Adds sort, filter and group-by to any <table>.
+ *
+ * colDefs: array per column — {sort, filter, group, domain}
+ *   sort   (bool, default true)  – clickable header sorts
+ *   filter (bool, default true)  – filter input in header
+ *   group  (bool, default true)  – ⊞ group-by icon
+ *   domain (bool, default false) – for FQDN: group key = everything after first dot
+ *
+ * opts: {defaultGroupCol, defaultSortCol, defaultSortDir}
+ *
+ * Persists sort/group state in localStorage keyed by tableId.
+ * ------------------------------------------------------- */
+(function() {
+  function xiemTable(tableId, colDefs, opts) {
+    opts = opts || {};
+    var table   = document.getElementById(tableId);
+    if (!table) return;
+    var thead   = table.querySelector('thead');
+    var tbody   = table.querySelector('tbody');
+    var ths     = Array.prototype.slice.call(thead.querySelectorAll('tr:first-child th'));
+    var ncols   = ths.length;
+
+    // --- restore or init state ---
+    var stKey = 'ximTbl_' + tableId;
+    var st;
+    try { st = JSON.parse(localStorage.getItem(stKey) || 'null'); } catch(e) { st = null; }
+    if (!st) st = {
+      sortCol:  opts.defaultSortCol  != null ? opts.defaultSortCol  : null,
+      sortDir:  opts.defaultSortDir  != null ? opts.defaultSortDir  : 1,
+      groupCol: opts.defaultGroupCol != null ? opts.defaultGroupCol : null,
+      filters:  {}
+    };
+    function saveState() {
+      try { localStorage.setItem(stKey, JSON.stringify(st)); } catch(e) {}
+    }
+
+    // --- collect row data once ---
+    var rows = [];
+    Array.prototype.forEach.call(tbody.querySelectorAll('tr'), function(tr) {
+      var tds  = Array.prototype.slice.call(tr.querySelectorAll('td'));
+      var vals = tds.map(function(td, i) {
+        // prefer explicit data-sort, then first data-utc inside, then textContent
+        var v = td.getAttribute('data-sort');
+        if (v === null) {
+          var utcEl = td.querySelector('[data-utc]');
+          v = utcEl ? (utcEl.getAttribute('data-utc') || '') : td.textContent.trim();
+        }
+        return v;
+      });
+      rows.push({tr: tr, vals: vals});
+    });
+
+    function groupKey(row, col) {
+      var v = row.vals[col] || '';
+      if ((colDefs[col] || {}).domain) {
+        // extract everything after first dot as domain
+        var dot = v.indexOf('.');
+        return dot >= 0 ? v.slice(dot + 1) : (v || '—');
+      }
+      return v || '—';
+    }
+
+    // --- build enhanced header ---
+    ths.forEach(function(th, i) {
+      var def = colDefs[i] || {};
+      var inner = document.createElement('span');
+      inner.style.cssText = 'display:inline-flex;align-items:center;gap:5px;width:100%';
+      inner.innerHTML = th.innerHTML;
+      th.innerHTML = '';
+      th.appendChild(inner);
+      th.style.whiteSpace = 'nowrap';
+
+      if (def.sort !== false) {
+        var si = document.createElement('span');
+        si.className = 'xi-sort';
+        si.style.cssText = 'font-size:9px;color:var(--muted);margin-left:2px;flex-shrink:0';
+        si.textContent = '⇕';
+        inner.appendChild(si);
+        th.style.cursor = 'pointer';
+        th.style.userSelect = 'none';
+        th.addEventListener('click', function(e) {
+          if (e.target.classList.contains('xi-grp')) return;
+          // cycle: none → asc → desc → none
+          if (st.sortCol !== i) {
+            st.sortCol = i; st.sortDir = 1;
+          } else if (st.sortDir === 1) {
+            st.sortDir = -1;
+          } else {
+            st.sortCol = null; st.sortDir = 1;
+          }
+          saveState(); render();
+        });
+      }
+
+      if (def.group !== false && i < ncols - 1) {
+        var gi = document.createElement('span');
+        gi.className = 'xi-grp';
+        gi.title = 'Group by this column';
+        gi.style.cssText = 'font-size:10px;cursor:pointer;color:var(--muted);padding:1px 4px;border-radius:3px;flex-shrink:0;margin-left:auto';
+        gi.textContent = '⊞';
+        gi.addEventListener('click', function(e) {
+          e.stopPropagation();
+          st.groupCol = (st.groupCol === i) ? null : i;
+          saveState(); render();
+        });
+        inner.appendChild(gi);
+      }
+    });
+
+    // --- filter row ---
+    var filterTr = document.createElement('tr');
+    filterTr.className = 'xi-filter-row';
+    ths.forEach(function(th, i) {
+      var ftd = document.createElement('th');
+      ftd.style.cssText = 'padding:3px 8px;background:var(--bg)';
+      var def = colDefs[i] || {};
+      if (def.filter !== false && def.sort !== false && i < ncols - 1) {
+        var inp = document.createElement('input');
+        inp.type = 'text';
+        inp.placeholder = '⌕';
+        inp.style.cssText = 'width:100%;padding:3px 6px;font-size:11px;background:var(--surface);border:1px solid var(--border);border-radius:3px;color:var(--text);outline:none';
+        inp.value = st.filters[i] || '';
+        inp.addEventListener('focus', function() { this.style.borderColor='var(--accent)'; });
+        inp.addEventListener('blur',  function() { this.style.borderColor='var(--border)'; });
+        inp.addEventListener('input', function() {
+          if (this.value) st.filters[i] = this.value.toLowerCase();
+          else delete st.filters[i];
+          saveState(); render();
+        });
+        ftd.appendChild(inp);
+      }
+      filterTr.appendChild(ftd);
+    });
+    thead.appendChild(filterTr);
+
+    // --- render ---
+    function render() {
+      // update sort icons
+      ths.forEach(function(th, i) {
+        var si = th.querySelector('.xi-sort');
+        if (!si) return;
+        var active = st.sortCol === i;
+        si.textContent = active ? (st.sortDir === 1 ? '▲' : '▼') : '⇕';
+        si.style.color  = active ? 'var(--accent)' : 'var(--muted)';
+      });
+      // update group icons
+      ths.forEach(function(th, i) {
+        var gi = th.querySelector('.xi-grp');
+        if (!gi) return;
+        var active = st.groupCol === i;
+        gi.style.color      = active ? 'var(--accent)'             : 'var(--muted)';
+        gi.style.background = active ? 'rgba(0,212,170,0.12)'      : '';
+        gi.textContent      = active ? '⊟' : '⊞';
+      });
+
+      // filter
+      var visible = rows.filter(function(row) {
+        return Object.keys(st.filters).every(function(col) {
+          var f = st.filters[col];
+          return !f || (row.vals[col] || '').toLowerCase().indexOf(f) >= 0;
+        });
+      });
+
+      // sort (applied before or after grouping as secondary sort)
+      function sortRows(arr, col, dir) {
+        if (col === null) return arr;
+        return arr.slice().sort(function(a, b) {
+          var av = a.vals[col] || '', bv = b.vals[col] || '';
+          return av < bv ? -dir : av > bv ? dir : 0;
+        });
+      }
+
+      tbody.innerHTML = '';
+
+      if (st.groupCol !== null) {
+        // sort by group key first, secondary by sortCol
+        var gc = st.groupCol;
+        var sorted = visible.slice().sort(function(a, b) {
+          var ag = groupKey(a, gc), bg2 = groupKey(b, gc);
+          if (ag < bg2) return -1;
+          if (ag > bg2) return 1;
+          if (st.sortCol !== null && st.sortCol !== gc) {
+            var av = a.vals[st.sortCol] || '', bv = b.vals[st.sortCol] || '';
+            return av < bv ? -st.sortDir : av > bv ? st.sortDir : 0;
+          }
+          return 0;
+        });
+        var lastGrp = null;
+        sorted.forEach(function(row) {
+          var grp = groupKey(row, gc);
+          if (grp !== lastGrp) {
+            var gtr = document.createElement('tr');
+            gtr.style.cssText = 'background:rgba(0,212,170,0.04);pointer-events:none';
+            var gtd = document.createElement('td');
+            gtd.colSpan = ncols;
+            gtd.style.cssText = 'padding:5px 12px;font-size:11px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:0.8px;border-top:1px solid var(--border)';
+            gtd.textContent = grp;
+            gtr.appendChild(gtd);
+            tbody.appendChild(gtr);
+            lastGrp = grp;
+          }
+          tbody.appendChild(row.tr);
+        });
+      } else {
+        sortRows(visible, st.sortCol, st.sortDir).forEach(function(r) {
+          tbody.appendChild(r.tr);
+        });
+      }
+
+      if (visible.length === 0) {
+        var etr = document.createElement('tr');
+        var etd = document.createElement('td');
+        etd.colSpan = ncols;
+        etd.style.cssText = 'color:var(--muted);text-align:center;padding:24px';
+        etd.textContent = 'Zadne zaznamy.';
+        etr.appendChild(etd);
+        tbody.appendChild(etr);
+      }
+    }
+
+    render();
+  }
+
+  window.xiemTable = xiemTable;
+})();
 </script>
 </body>
 </html>
