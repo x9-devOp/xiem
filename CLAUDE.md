@@ -42,8 +42,13 @@ Agent zaroven slouzi jako obecny endpoint-management nastroj (ad-hoc prikazy, pa
 scp app.py spravce@xiem.x9.cz:/tmp/app.py
 ssh spravce@xiem.x9.cz 'sudo cp /tmp/app.py /var/www/flask_xiem/app.py && sudo systemctl restart xiem-api'
 
+# Mac -> server (generate_lists.py):
+scp generate_lists.py spravce@xiem.x9.cz:/tmp/generate_lists.py
+ssh spravce@xiem.x9.cz 'sudo cp /tmp/generate_lists.py /usr/local/bin/generate_lists.py'
+
 # Mac -> server (agent binary):
 ./build_agent.sh   # dotnet publish win-x64 + scp na server
+# Pak poslat 'update' command vsem agentum pres GUI /commands
 
 # Server-side one-time setup:
 ssh spravce@xiem.x9.cz 'bash -s' < deploy_server.sh
@@ -95,6 +100,9 @@ Worker
 - Vsechny prikazy jsou podepsany serverem (RSA-PSS-SHA256, salt=32)
 - Klic: /etc/xiem/signing_key.pem (root:www-data 640) - Flask potrebuje read prava
 - Canonical message: "{id}:{type}:{compact_sorted_json_payload}"
+- Python strana: `json.dumps(payload, sort_keys=True, separators=(',',':'))`
+- C# strana: `SortedDictionary` + `JsonSerializer` s `JavaScriptEncoder.UnsafeRelaxedJsonEscaping`
+  KRITICKY: bez UnsafeRelaxedJsonEscaping by STJ escapoval apostrofy jako \u0027, Python ne
 - Agent stahuje pubkey pri startu z /api/agent/pubkey, pinuje na disk
 - Pokud pubkey neni k dispozici, CommandPoller ho retryuje pred kazdym pollem
 - POZOR: po prvnim spusteni agenta kdyz server nema klic (404) -> restart Windows service
@@ -145,6 +153,20 @@ ip_field: nazev pole v JSON outputu, ktere obsahuje IP adresu (pro generate_list
 - Aplikuje se na _ingest_auth() a _ingest_eset() pred kazdym INSERT
 - auth_failures: historicka privatni IP a "IP not found" stringy byly jednourazove smazany
 
+## AI Status stranka
+- Route: /ai-status, template: templates/ai_status.html
+- Background daemon thread `ai-status-bg` spusten pri startu Flasku
+- Generuje analyzu kazdych 3600s (1h), prvni generovani 15s po startu
+- Vyzaduje ANTHROPIC_API_KEY v /etc/systemd/system/xiem-api.service
+- Cache: `_AI_STATUS_CACHE` dict {ts, content, error} v pameti (sdilena pres gunicorn workers ne)
+- Refresh tlacitko: ?refresh=1 spusti novy thread okamzite (pokud API key existuje)
+- Model: claude-opus-4-6 (nejschopnejsi)
+
+## AI vysvetleni listu (list_detail.html)
+- Tlacitko "Vysvetlit" na strance detailu listu
+- Async fetch na /lists/<id>/explain, cache v _LIST_EXPLAIN_CACHE
+- Vraci markdown, renderuje pres marked.js
+
 ## Pravidla pro tento projekt
 - Komentare v kodu: anglicky, bez diakritiky
 - Pouze ASCII v zdrojovem kodu
@@ -154,31 +176,33 @@ ip_field: nazev pole v JSON outputu, ktere obsahuje IP adresu (pro generate_list
 - get_db() je @contextmanager - nepouzivat jako obycejnou funkci
 - Zmeny DB se vzdy promitaji do GUI (aby byly sledovatelne a kontrolovatelne)
 - Zadne hardcoded hodnoty v agentovi - vse pres parametry pri instalaci nebo ze serveru
-- GRANT pro xiem_writer na nových tabulkach: spustit jako postgres superuser
+- GRANT pro xiem_writer na novych tabulkach: spustit jako postgres superuser
 
 ## Scoring model (generate_lists.py)
 - Exponencialni decay: `score = weight * e^(-0.05 * age_days)`
 - Vahy: ESET=1.5, auth_failures=0.5, manual_block=10.0, upstream_feed=f.vaha
+  (POZOR: default vaha v kodu je 1.0, spravne hodnoty jsou nastaveny v output_list_sources.parametry)
 - Threshold: 3.0 pro zarazeni
 - /24 agregace: >= 3 IP ze stejneho /24 bloku -> agreguj
 - Generovani: kazdu minutu, ale list se generuje jen pokud now()-last_generated > interval_min
 - Script moduly: IP se extrahuje podle ip_field z agent_module_config.parametry -> agent_events
+- last_generated se updatuje po uspesnem zapisu (UPDATE output_lists SET last_generated = now())
 
 ## GUI navigace (aktualni stav)
 ```
 Dashboard          (prehled, stav agentu, aktivita)
 Infrastruktura:
 ├── Klienti        (seznam, detail: agenti klienta, IP restriction)
-├── Agenti         (seznam, prirazeni ke klientovi, detail)
+├── Agenti         (seznam, prirazeni ke klientovi, detail: posledni prikazy + ingesty)
 ├── Skupiny        (modul config: typ, interval, skript, params)
 └── Prikazy        (novy prikaz: PS/CMD/update/panic, audit log, vysledky)
 Blocklists:
 ├── Upstream Feeds
 ├── Manual IPs
-└── Listy          (definice, zdroje, interval_min, detail/zdroj auth_failures/eset)
+└── Listy          (definice, zdroje, interval_min, detail/zdroj auth_failures/eset, AI vysvetleni)
 Admin:
 └── Agent binary   (nahrat novou verzi, postup aktualizace)
-Analyza:           (stub - roadmap)
+AI Status:         (automaticka analyza infrastruktury, generovana kazdou hodinu)
 ```
 
 ## Implementacni fazovy plan - DOKONCENO
@@ -188,6 +212,12 @@ Analyza:           (stub - roadmap)
 - **Faze 4:** RSA podepisovani vsech prikazu + PanicWatchdog [DONE]
 - **Faze 5:** GUI overhaul (klienti, agenti, skupiny dle nove navigace) [DONE]
 - **Faze 6:** Auto-update agenta (update command + binary upload GUI) [DONE]
+- **Bugfixy (2026-03-10):**
+  - /api/agent/commands vracel signature=null -> prikazy vzdy odmitnuty [FIXED]
+  - generate_lists.py nepsal last_generated -> interval_min se nerespektoval [FIXED]
+  - auth_failures vaha byla 1.0 misto 0.5 (opraveno pres DB) [FIXED]
+  - SignatureVerifier pouzival JavaScriptEncoder.Default ktery escapuje ' na \u0027 [FIXED]
+  - AI status generoval pri kazdem page load misto na pozadi [FIXED]
 
 ## Systemd (bezne prikazy)
 ```bash
@@ -206,7 +236,7 @@ psql "$(sudo grep XIEM_DB_DSN /etc/xiem/env | cut -d= -f2-)" -c 'SELECT 1;'
 ## Roadmap - co je dal
 - Analyze sekce: /analyze/lookup (proc je IP v blocklistu?) + /analyze/top-offenders
 - Per-source scoring parametry editovatelne pres GUI (output_list_sources.parametry JSONB)
-- GUI pro prikazy zatim neni plne nasazeno - pouzit curl na server nebo psql pro odeslani
+- Diagnostika proc auth_failures nema data od 2026-01-14 (agenti po update by meli zacit zapisovat)
 
 ## Bezpecnost DB (aktualni stav)
 - pg_hba.conf: pouze localhost (127.0.0.1/32 scram-sha-256), zadny externi pristup
