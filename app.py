@@ -5,6 +5,7 @@ import ipaddress
 import json as _json
 import re
 import subprocess as _subprocess
+import threading as _threading
 import time as _time
 import requests
 import psycopg2
@@ -1498,7 +1499,8 @@ def command_cancel(cmd_id):
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 _AI_STATUS_CACHE = {"ts": 0.0, "content": None, "error": None}
-_AI_STATUS_TTL = 1800  # 30 minutes
+_AI_STATUS_TTL = 3600  # 1 hour
+_AI_STATUS_GENERATING = False
 
 
 def _gather_status_context() -> str:
@@ -1699,31 +1701,51 @@ def _call_claude(context: str) -> str:
     return msg.content[0].text
 
 
+def _ai_status_run():
+    """Generate AI status and store in cache. Called from background thread."""
+    global _AI_STATUS_GENERATING
+    if _AI_STATUS_GENERATING:
+        return
+    _AI_STATUS_GENERATING = True
+    try:
+        context = _gather_status_context()
+        _AI_STATUS_CACHE["content"] = _call_claude(context)
+        _AI_STATUS_CACHE["error"] = None
+        _AI_STATUS_CACHE["ts"] = _time.time()
+    except Exception as exc:
+        _AI_STATUS_CACHE["error"] = str(exc)
+    finally:
+        _AI_STATUS_GENERATING = False
+
+
+def _ai_status_loop():
+    """Background thread: generate AI status every _AI_STATUS_TTL seconds."""
+    _time.sleep(15)  # Let gunicorn workers finish starting up
+    while True:
+        if ANTHROPIC_API_KEY:
+            _ai_status_run()
+        _time.sleep(_AI_STATUS_TTL)
+
+
+_threading.Thread(target=_ai_status_loop, daemon=True, name="ai-status-bg").start()
+
+
 @app.route("/ai-status")
 def ai_status():
-    cache = _AI_STATUS_CACHE
-    age = _time.time() - cache["ts"]
     force = request.args.get("refresh") == "1"
+    if force and ANTHROPIC_API_KEY and not _AI_STATUS_GENERATING:
+        _threading.Thread(target=_ai_status_run, daemon=True).start()
+        flash("Refresh zahajen — obnovte stranku za ~30 sekund.", "ok")
+        return redirect(url_for("ai_status"))
 
-    if force or age > _AI_STATUS_TTL or cache["content"] is None:
-        if not ANTHROPIC_API_KEY:
-            cache["error"] = "ANTHROPIC_API_KEY neni nastaven (pridej do /etc/xiem/env)."
-            cache["content"] = None
-        else:
-            try:
-                context = _gather_status_context()
-                cache["content"] = _call_claude(context)
-                cache["error"] = None
-                cache["ts"] = _time.time()
-            except Exception as exc:
-                cache["error"] = str(exc)
-
+    cache = _AI_STATUS_CACHE
     age_min = int((_time.time() - cache["ts"]) / 60) if cache["ts"] > 0 else None
     return render_template(
         "ai_status.html",
         content=cache["content"],
         error=cache["error"],
         age_min=age_min,
+        generating=_AI_STATUS_GENERATING,
     )
 
 

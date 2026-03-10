@@ -29,14 +29,22 @@
       </p>
     {% endif %}
   </div>
+{% if generating and not content %}
+  <div class="card">
+    <p style="color:var(--muted);font-size:13px">&#9711; Generuji analyzu, stranka se sama obnovi...</p>
+  </div>
+  <script>setTimeout(function(){ location.reload(); }, 15000);</script>
 {% elif content %}
   <div class="card" id="ai-output">
+    {% if generating %}
+      <p style="font-size:11px;color:var(--muted);margin-bottom:12px">&#9711; Refresh probiha na pozadi...</p>
+    {% endif %}
     <div id="md-content" style="display:none">{{ content }}</div>
     <div id="md-rendered" class="markdown-body"></div>
   </div>
 {% else %}
   <div class="card">
-    <p style="color:var(--muted);font-size:13px">Analyza se generuje, prosim obnovte stranku za chvili.</p>
+    <p style="color:var(--muted);font-size:13px">Analyza bude vygenerovana do 15 sekund po startu serveru.</p>
   </div>
 {% endif %}
 
