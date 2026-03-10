@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 
 namespace XiemAgent;
@@ -18,10 +19,13 @@ public class SignatureVerifier
         Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
         "XiemAgent", "server_pubkey.pem");
 
+    // UnsafeRelaxedJsonEscaping matches Python json.dumps behavior:
+    // apostrophes and HTML chars are NOT escaped to \uXXXX.
     private static readonly JsonSerializerOptions CompactOpts = new()
     {
         WriteIndented = false,
-        PropertyNamingPolicy = null
+        PropertyNamingPolicy = null,
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
     public bool IsLoaded => _key != null;
