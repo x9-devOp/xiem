@@ -121,4 +121,120 @@
     }
   });
 </script>
+
+<!-- Live data -->
+<style>
+  details.live-section { margin-bottom: 16px; }
+  details.live-section > summary {
+    cursor: pointer;
+    padding: 12px 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  details.live-section[open] > summary { border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-bottom-color: transparent; }
+  details.live-section > summary::before { content: '▶'; font-size: 9px; transition: transform 0.15s; }
+  details.live-section[open] > summary::before { transform: rotate(90deg); }
+  details.live-section .live-table-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: none;
+    border-bottom-left-radius: 6px;
+    border-bottom-right-radius: 6px;
+    overflow-x: auto;
+    max-height: 400px;
+    overflow-y: auto;
+  }
+  .count-badge {
+    display: inline-block;
+    background: rgba(0,212,170,0.12);
+    color: var(--accent);
+    border-radius: 10px;
+    padding: 1px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-left: 6px;
+  }
+</style>
+
+<details class="live-section">
+  <summary>Auth Failures (posledních 50) <span class="count-badge">{{ recent_auth | length }}</span></summary>
+  <div class="live-table-wrap">
+    {% if recent_auth %}
+    <table>
+      <thead><tr><th>Čas</th><th>IP adresa</th><th>Uživatel</th><th>Server</th></tr></thead>
+      <tbody>
+        {% for r in recent_auth %}
+        <tr>
+          <td class="mono" style="font-size:11px;white-space:nowrap;color:var(--muted)">{{ r.ts.strftime('%Y-%m-%d %H:%M:%S') if r.ts else '—' }}</td>
+          <td class="mono" style="color:var(--accent)">{{ r.ipadresa or '—' }}</td>
+          <td class="mono" style="font-size:11px">{{ r.uzivatel or '—' }}</td>
+          <td class="mono" style="font-size:11px;color:var(--muted)">{{ r.sourceserver or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p style="padding:16px;color:var(--muted);font-size:13px">Žádná data.</p>
+    {% endif %}
+  </div>
+</details>
+
+<details class="live-section">
+  <summary>ESET Network Blocks (posledních 50) <span class="count-badge">{{ recent_eset | length }}</span></summary>
+  <div class="live-table-wrap">
+    {% if recent_eset %}
+    <table>
+      <thead><tr><th>Čas události</th><th>IP adresa</th><th>Akce</th><th>Protokol</th><th>Server</th></tr></thead>
+      <tbody>
+        {% for r in recent_eset %}
+        <tr>
+          <td class="mono" style="font-size:11px;white-space:nowrap;color:var(--muted)">{{ r.cas_udalosti.strftime('%Y-%m-%d %H:%M:%S') if r.cas_udalosti else '—' }}</td>
+          <td class="mono" style="color:var(--accent)">{{ r.ipadresa or '—' }}</td>
+          <td style="font-size:11px">{{ r.akce or '—' }}</td>
+          <td class="mono" style="font-size:11px;color:var(--muted)">{{ r.protokol or '—' }}</td>
+          <td class="mono" style="font-size:11px;color:var(--muted)">{{ r.sourceserver or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p style="padding:16px;color:var(--muted);font-size:13px">Žádná data.</p>
+    {% endif %}
+  </div>
+</details>
+
+<details class="live-section">
+  <summary>Agent Events (posledních 20) <span class="count-badge">{{ recent_events | length }}</span></summary>
+  <div class="live-table-wrap">
+    {% if recent_events %}
+    <table>
+      <thead><tr><th>Čas</th><th>Agent</th><th>Modul</th><th>Payload (zkráceno)</th></tr></thead>
+      <tbody>
+        {% for r in recent_events %}
+        <tr>
+          <td class="mono" style="font-size:11px;white-space:nowrap;color:var(--muted)">
+            <span data-utc="{{ r.created_at.isoformat() if r.created_at else '' }}" data-fmt="dt-s">{{ r.created_at.strftime('%Y-%m-%d %H:%M:%S') if r.created_at else '—' }}</span>
+          </td>
+          <td class="mono" style="color:var(--text-hi)">{{ r.hostname }}</td>
+          <td><span class="badge badge-off">{{ r.module }}</span></td>
+          <td class="mono" style="font-size:11px;color:var(--muted);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.payload_preview or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p style="padding:16px;color:var(--muted);font-size:13px">Žádná data.</p>
+    {% endif %}
+  </div>
+</details>
 {% endblock %}

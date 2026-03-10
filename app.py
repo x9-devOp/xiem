@@ -1785,12 +1785,47 @@ def ai_status():
 
     cache = _AI_STATUS_CACHE
     age_min = int((_time.time() - cache["ts"]) / 60) if cache["ts"] > 0 else None
+
+    recent_auth = []
+    recent_eset = []
+    recent_events = []
+    try:
+        with get_db() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT (datum + cas) AS ts, ipadresa, uzivatel, sourceserver
+                    FROM auth_failures
+                    ORDER BY importtime DESC LIMIT 50
+                """)
+                recent_auth = cur.fetchall()
+
+                cur.execute("""
+                    SELECT cas_udalosti, ipadresa, akce, protokol, sourceserver
+                    FROM eset_network_blocks
+                    ORDER BY cas_udalosti DESC LIMIT 50
+                """)
+                recent_eset = cur.fetchall()
+
+                cur.execute("""
+                    SELECT ae.created_at, a.hostname, ae.module,
+                           LEFT(ae.payload::text, 120) AS payload_preview
+                    FROM agent_events ae
+                    JOIN agents a ON ae.agent_id = a.id
+                    ORDER BY ae.created_at DESC LIMIT 20
+                """)
+                recent_events = cur.fetchall()
+    except Exception:
+        pass
+
     return render_template(
         "ai_status.html",
         content=cache["content"],
         error=cache["error"],
         age_min=age_min,
         generating=_AI_STATUS_GENERATING,
+        recent_auth=recent_auth,
+        recent_eset=recent_eset,
+        recent_events=recent_events,
     )
 
 
