@@ -144,7 +144,8 @@ def _resolve_source(raw: dict) -> dict:
         elif src_type == "agent_script":
             return {"source_type": "agent_events", "source_id": None, "parametry": merged}
         elif src_type == "manual":
-            return {"source_type": "manual", "source_id": None, "parametry": merged}
+            # source_id carries the sources.id so compute_scores can filter manual_ips
+            return {"source_type": "manual", "source_id": raw.get("source_ref_id"), "parametry": merged}
 
     # Legacy fallback: no source_ref_id set
     return {
@@ -312,10 +313,18 @@ def compute_scores_for_list(conn, sources: list, threshold: float) -> dict[str, 
                     scores[ip] = scores.get(ip, 0.0) + vaha * decay(float(row["age_days"]), lam)
 
             elif stype == "manual":
-                cur.execute("""
-                    SELECT zaznam FROM manual_ips
-                    WHERE enabled = true AND typ = 'block' AND list_type = 'ip'
-                """)
+                manual_src_id = src.get("source_id")
+                if manual_src_id:
+                    cur.execute("""
+                        SELECT zaznam FROM manual_ips
+                        WHERE enabled = true AND typ = 'block' AND source_id = %s
+                    """, (manual_src_id,))
+                else:
+                    # Legacy: entries without source_id (pre-migration)
+                    cur.execute("""
+                        SELECT zaznam FROM manual_ips
+                        WHERE enabled = true AND typ = 'block' AND source_id IS NULL
+                    """)
                 for row in cur.fetchall():
                     zaznam = row["zaznam"]
                     scores[zaznam] = scores.get(zaznam, 0.0) + WEIGHT_MANUAL
@@ -328,7 +337,7 @@ def compute_excludes(conn) -> netaddr.IPSet:
     with conn.cursor() as cur:
         cur.execute("""
             SELECT zaznam FROM manual_ips
-            WHERE enabled = true AND typ = 'exclude' AND list_type = 'ip'
+            WHERE enabled = true AND typ = 'exclude'
         """)
         for row in cur.fetchall():
             try:
@@ -450,6 +459,7 @@ def main():
                 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                     cur.execute("""
                         SELECT ols.source_type, ols.source_id, ols.parametry,
+                               ols.source_ref_id,
                                s.source_type AS src_type,
                                s.parametry   AS src_params
                         FROM output_list_sources ols

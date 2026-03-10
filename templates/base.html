@@ -380,9 +380,6 @@
     <li><a href="{{ url_for('sources_list') }}" class="{{ 'active' if request.endpoint in ['sources_list', 'source_detail'] }}">
       <span class="icon">◎</span> Zdroje
     </a></li>
-    <li><a href="{{ url_for('manual_ips_list') }}" class="{{ 'active' if request.endpoint == 'manual_ips_list' }}">
-      <span class="icon">+</span> Manual IPs
-    </a></li>
     <div class="section-label">Vystupy</div>
     <li><a href="{{ url_for('lists_list') }}" class="{{ 'active' if request.endpoint in ['lists_list', 'list_detail', 'list_source_auth_failures', 'list_source_eset_network'] }}">
       <span class="icon">≡</span> Listy

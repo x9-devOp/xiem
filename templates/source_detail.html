@@ -56,7 +56,11 @@
     {% endif %}
   {% elif source.source_type == 'manual' %}
     <div class="stat-card">
-      <div class="label">Aktivnich zaznamu</div>
+      <div class="label">Celkem</div>
+      <div class="value" style="font-size:22px">{{ stats.total_all or 0 }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Aktivnich</div>
       <div class="value accent" style="font-size:22px">{{ stats.total or 0 }}</div>
     </div>
 
@@ -162,29 +166,93 @@
 </div>
 
 {% elif source.source_type == 'manual' %}
-<!-- Manual IPs: redirect to dedicated page -->
+<!-- Manual source: inline entry management -->
 <div class="card">
-  <div class="card-title">Manual IPs</div>
-  <p style="font-size:13px;color:var(--muted)">
-    Spravujte zaznamy na strance
-    <a href="{{ url_for('manual_ips_list') }}" style="color:var(--accent)">Manual IPs ↗</a>
-  </p>
+  <div class="card-title">Pridat zaznam</div>
+  <form method="POST" action="{{ url_for('source_entry_add', source_id=source.id) }}">
+    <div class="form-row">
+      <div class="form-group" style="flex:1">
+        <label>IP / CIDR</label>
+        <input type="text" name="zaznam" placeholder="napr. 1.2.3.4 nebo 10.0.0.0/24" required
+               style="min-width:220px">
+      </div>
+      <div class="form-group">
+        <label>Typ</label>
+        <select name="typ">
+          <option value="block">block (blocklist)</option>
+          <option value="exclude">exclude (whitelist)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Poznamka</label>
+        <input type="text" name="poznamka" placeholder="volitelne">
+      </div>
+      <button type="submit" class="btn btn-primary">+ Pridat</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-title">
+    Zaznamy ({{ entries | length }}
+    {% if stats.total != stats.total_all %}, {{ stats.total }} aktivnich{% endif %})
+  </div>
   {% if entries %}
-  <div style="max-height:400px;overflow-y:auto;margin-top:12px">
+  <div style="margin-bottom:10px">
+    <input type="text" id="entry-filter" placeholder="Filtrovat..."
+           oninput="filterEntries(this.value)"
+           style="width:220px;padding:6px 10px;font-size:12px">
+  </div>
+  <div style="max-height:560px;overflow-y:auto">
   <table>
-    <thead><tr><th>Zaznam</th><th>Typ</th></tr></thead>
-    <tbody>
+    <thead>
+      <tr><th>Zaznam</th><th>Typ</th><th>Poznamka</th><th>Status</th><th>Akce</th></tr>
+    </thead>
+    <tbody id="entry-tbody">
       {% for e in entries %}
       <tr>
-        <td class="mono" style="color:var(--accent);font-size:12px">{{ e.zaznam }}</td>
-        <td><span class="badge {{ 'badge-err' if e.typ == 'block' else 'badge-off' }}">{{ e.typ }}</span></td>
+        <td class="mono" style="color:{{ 'var(--accent)' if e.enabled else 'var(--muted)' }};font-size:12px">
+          {{ e.zaznam }}
+        </td>
+        <td>
+          <span class="badge {{ 'badge-err' if e.typ == 'block' else 'badge-off' }}">{{ e.typ }}</span>
+        </td>
+        <td style="font-size:11px;color:var(--muted)">{{ e.poznamka or '' }}</td>
+        <td>
+          {% if e.enabled %}
+            <span class="badge badge-on">aktivni</span>
+          {% else %}
+            <span class="badge badge-off">vypnuto</span>
+          {% endif %}
+        </td>
+        <td>
+          <div style="display:flex;gap:4px">
+            <form class="inline" method="POST"
+                  action="{{ url_for('source_entry_toggle', source_id=source.id, entry_id=e.id) }}">
+              <button class="btn btn-ghost btn-sm">{{ '⏸' if e.enabled else '▶' }}</button>
+            </form>
+            <form class="inline" method="POST"
+                  action="{{ url_for('source_entry_delete', source_id=source.id, entry_id=e.id) }}"
+                  onsubmit="return confirm('Smazat {{ e.zaznam }}?')">
+              <button class="btn btn-danger btn-sm">✕</button>
+            </form>
+          </div>
+        </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
   </div>
+  <script>
+    function filterEntries(q) {
+      q = q.toLowerCase();
+      document.querySelectorAll('#entry-tbody tr').forEach(function(tr) {
+        tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
+      });
+    }
+  </script>
   {% else %}
-  <p style="color:var(--muted);font-size:13px;margin-top:8px">Zadne zaznamy.</p>
+  <p style="color:var(--muted);font-size:13px">Zadne zaznamy. Pridejte prvni zaznam nahore.</p>
   {% endif %}
 </div>
 

@@ -622,8 +622,12 @@ def sources_list():
             native_stats = {r["tbl"]: r for r in cur.fetchall()}
             cur.execute("SELECT id, pocet_zaznamu, posledni_refresh FROM upstream_feeds")
             feed_stats = {r["id"]: r for r in cur.fetchall()}
-            cur.execute("SELECT COUNT(*) AS total FROM manual_ips WHERE enabled = true")
-            manual_stats = cur.fetchone() or {}
+            cur.execute("""
+                SELECT source_id, COUNT(*) AS total
+                FROM manual_ips WHERE enabled = true
+                GROUP BY source_id
+            """)
+            manual_by_source = {r["source_id"]: r for r in cur.fetchall()}
             # Stats for agent_script sources (by module name)
             cur.execute("""
                 SELECT module,
@@ -650,7 +654,8 @@ def sources_list():
             s["h24_count"]     = None
             s["last_activity"] = st.get("posledni_refresh")
         elif s["source_type"] == "manual":
-            s["total_count"]   = manual_stats.get("total", 0)
+            st = manual_by_source.get(s["id"], {})
+            s["total_count"]   = st.get("total", 0)
             s["h24_count"]     = None
             s["last_activity"] = None
         elif s["source_type"] == "agent_script":
@@ -702,6 +707,26 @@ def source_add_feed():
     return redirect(url_for("sources_list"))
 
 
+@app.route("/sources/add-manual", methods=["POST"])
+def source_add_manual():
+    nazev    = request.form.get("nazev", "").strip()
+    poznamka = request.form.get("poznamka", "").strip()
+    if not nazev:
+        flash("Nazev je povinny.", "error")
+        return redirect(url_for("sources_list"))
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO sources (nazev, source_type, parametry, vaha_default)
+                    VALUES (%s, 'manual', %s, 10.0)
+                """, (nazev, psycopg2.extras.Json({"poznamka": poznamka} if poznamka else {})))
+        flash(f"Manual zdroj '{nazev}' pridan.", "ok")
+    except Exception as e:
+        flash(f"Chyba: {e}", "error")
+    return redirect(url_for("sources_list"))
+
+
 @app.route("/sources/add-script", methods=["POST"])
 def source_add_script():
     nazev    = request.form.get("nazev", "").strip()
@@ -728,6 +753,60 @@ def source_add_script():
     except Exception as e:
         flash(f"Chyba: {e}", "error")
     return redirect(url_for("sources_list"))
+
+
+@app.route("/sources/<int:source_id>/entries/add", methods=["POST"])
+def source_entry_add(source_id):
+    zaznam   = request.form.get("zaznam", "").strip()
+    typ      = request.form.get("typ", "block")
+    poznamka = request.form.get("poznamka", "").strip()
+
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT source_type FROM sources WHERE id = %s", (source_id,))
+            src = cur.fetchone()
+    if not src or src["source_type"] != "manual":
+        abort(404)
+    if not zaznam:
+        flash("Zaznam je povinny.", "error")
+        return redirect(url_for("source_detail", source_id=source_id))
+    if typ not in ("block", "exclude"):
+        typ = "block"
+    if not validate_zaznam(zaznam, "ip"):
+        flash(f"Neplatny zaznam: {zaznam}", "error")
+        return redirect(url_for("source_detail", source_id=source_id))
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO manual_ips (zaznam, list_type, typ, poznamka, source_id)
+                    VALUES (%s, 'ip', %s, %s, %s)
+                    ON CONFLICT DO NOTHING
+                """, (zaznam, typ, poznamka or None, source_id))
+        flash(f"{zaznam} pridan.", "ok")
+    except Exception as e:
+        flash(f"Chyba: {e}", "error")
+    return redirect(url_for("source_detail", source_id=source_id))
+
+
+@app.route("/sources/<int:source_id>/entries/<int:entry_id>/toggle", methods=["POST"])
+def source_entry_toggle(source_id, entry_id):
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE manual_ips SET enabled = NOT enabled WHERE id = %s AND source_id = %s",
+                (entry_id, source_id))
+    return redirect(url_for("source_detail", source_id=source_id))
+
+
+@app.route("/sources/<int:source_id>/entries/<int:entry_id>/delete", methods=["POST"])
+def source_entry_delete(source_id, entry_id):
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM manual_ips WHERE id = %s AND source_id = %s",
+                        (entry_id, source_id))
+    flash("Zaznam smazan.", "ok")
+    return redirect(url_for("source_detail", source_id=source_id))
 
 
 @app.route("/sources/<int:source_id>/toggle", methods=["POST"])
@@ -892,10 +971,13 @@ def source_detail(source_id):
                     recent = cur.fetchall()
 
             elif source["source_type"] == "manual":
-                cur.execute("SELECT zaznam, typ FROM manual_ips WHERE enabled = true ORDER BY typ, zaznam LIMIT 500")
+                cur.execute("""
+                    SELECT id, zaznam, typ, poznamka, enabled
+                    FROM manual_ips WHERE source_id = %s ORDER BY typ, zaznam
+                """, (source_id,))
                 entries = cur.fetchall()
-                cur.execute("SELECT COUNT(*) AS total FROM manual_ips WHERE enabled = true")
-                stats = {"total": (cur.fetchone() or {}).get("total", 0)}
+                total   = sum(1 for e in entries if e["enabled"])
+                stats   = {"total": total, "total_all": len(entries)}
 
             elif source["source_type"] == "upstream_http":
                 fid = p.get("upstream_feed_id")
