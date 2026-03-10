@@ -338,7 +338,7 @@ def agent_get_commands(agent):
     with get_db() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
-                SELECT id, command_type, payload
+                SELECT id, command_type, payload, signature
                 FROM agent_commands
                 WHERE status = 'pending'
                   AND (
@@ -360,7 +360,7 @@ def agent_get_commands(agent):
                 """, (ids,))
 
     return jsonify([{"id": c["id"], "command_type": c["command_type"],
-                     "payload": c["payload"] or {}} for c in commands]), 200
+                     "payload": c["payload"] or {}, "signature": c["signature"]} for c in commands]), 200
 
 
 @app.route("/api/agent/commands/<int:cmd_id>/result", methods=["POST"])
