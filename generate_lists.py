@@ -13,7 +13,7 @@ import os
 import re
 import sys
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from contextlib import contextmanager
 
 import psycopg2
@@ -384,7 +384,7 @@ def main():
     with get_db() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
-                SELECT id, nazev, list_type
+                SELECT id, nazev, list_type, interval_min, last_generated
                 FROM output_lists
                 WHERE enabled = true AND list_type = 'ip'
                 ORDER BY nazev
@@ -398,6 +398,15 @@ def main():
     for lst in lists:
         list_id   = lst["id"]
         list_name = lst["nazev"]
+
+        # Skip if regenerated recently enough
+        if lst["last_generated"] is not None:
+            age_min = (datetime.now(timezone.utc) - lst["last_generated"]).total_seconds() / 60
+            if age_min < lst["interval_min"]:
+                log.info("List %s: skipping (generated %.1f min ago, interval %d min)",
+                         list_name, age_min, lst["interval_min"])
+                continue
+
         log.info("Processing list: %s", list_name)
 
         try:
@@ -443,6 +452,13 @@ def main():
                      sum(1 for e in blocklist if not e.endswith("/32")))
 
             write_output(f"{list_name}.txt", blocklist, source_desc, threshold)
+
+            with get_db() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE output_lists SET last_generated = now() WHERE id = %s",
+                        (list_id,)
+                    )
 
         except Exception as e:
             log.error("List %s generation failed: %s", list_name, e)
