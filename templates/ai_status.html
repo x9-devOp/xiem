@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %} — AI Status{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+  <div>
+    <h1>AI Status</h1>
+    <p>Automaticka analyza infrastruktury pomoci Claude AI</p>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px">
+    {% if age_min is not none %}
+      <span style="font-size:12px;color:var(--muted)">
+        Aktualizovano pred {{ age_min }} min
+      </span>
+    {% endif %}
+    <a href="{{ url_for('ai_status') }}?refresh=1" class="btn btn-ghost btn-sm">&#8635; Aktualizovat</a>
+  </div>
+</div>
+
+{% if error %}
+  <div class="card">
+    <div class="card-title" style="color:var(--danger)">Chyba</div>
+    <p style="color:var(--danger);font-size:13px;font-family:'IBM Plex Mono',monospace">{{ error }}</p>
+    {% if 'ANTHROPIC_API_KEY' in error %}
+      <p style="margin-top:12px;font-size:12px;color:var(--muted)">
+        Pridej do <code>/etc/xiem/env</code>:<br>
+        <code>ANTHROPIC_API_KEY=sk-ant-...</code><br>
+        Pak restart: <code>sudo systemctl restart xiem-api</code>
+      </p>
+    {% endif %}
+  </div>
+{% elif content %}
+  <div class="card" id="ai-output">
+    <div id="md-content" style="display:none">{{ content }}</div>
+    <div id="md-rendered" class="markdown-body"></div>
+  </div>
+{% else %}
+  <div class="card">
+    <p style="color:var(--muted);font-size:13px">Analyza se generuje, prosim obnovte stranku za chvili.</p>
+  </div>
+{% endif %}
+
+<style>
+  .markdown-body {
+    font-size: 14px;
+    line-height: 1.65;
+    color: var(--text);
+  }
+  .markdown-body h1, .markdown-body h2 {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-hi);
+    margin: 20px 0 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  .markdown-body h3 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+    margin: 14px 0 6px;
+  }
+  .markdown-body h1:first-child, .markdown-body h2:first-child {
+    margin-top: 0;
+  }
+  .markdown-body p { margin: 6px 0; }
+  .markdown-body ul, .markdown-body ol {
+    padding-left: 20px;
+    margin: 6px 0;
+  }
+  .markdown-body li { margin: 3px 0; }
+  .markdown-body code {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    background: rgba(255,255,255,0.06);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  .markdown-body pre {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 12px;
+    overflow-x: auto;
+    margin: 10px 0;
+  }
+  .markdown-body pre code {
+    background: none;
+    padding: 0;
+    font-size: 11px;
+  }
+  .markdown-body strong { color: var(--text-hi); }
+  .markdown-body blockquote {
+    border-left: 3px solid var(--accent);
+    margin: 10px 0;
+    padding: 4px 12px;
+    color: var(--muted);
+  }
+  .markdown-body hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 16px 0;
+  }
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    var src = document.getElementById('md-content');
+    var dst = document.getElementById('md-rendered');
+    if (src && dst) {
+      dst.innerHTML = marked.parse(src.textContent);
+    }
+  });
+</script>
+{% endblock %}

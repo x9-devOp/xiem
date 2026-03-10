@@ -4,6 +4,8 @@ import base64
 import ipaddress
 import json as _json
 import re
+import subprocess as _subprocess
+import time as _time
 import requests
 import psycopg2
 import psycopg2.extras
@@ -1382,6 +1384,241 @@ def command_cancel(cmd_id):
             """, (cmd_id,))
     flash("Prikaz zrusen.", "ok")
     return redirect(url_for("commands_list"))
+
+# ============================================================
+# AI Status
+# ============================================================
+
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+_AI_STATUS_CACHE = {"ts": 0.0, "content": None, "error": None}
+_AI_STATUS_TTL = 1800  # 30 minutes
+
+
+def _gather_status_context() -> str:
+    parts = []
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            # Agent overview
+            cur.execute("""
+                SELECT
+                    COUNT(*) AS total,
+                    COUNT(*) FILTER (WHERE posledni_kontakt >= NOW() - INTERVAL '10 minutes') AS online,
+                    COUNT(*) FILTER (WHERE posledni_kontakt < NOW() - INTERVAL '10 minutes'
+                                      OR posledni_kontakt IS NULL) AS offline
+                FROM agents WHERE aktivni = true
+            """)
+            s = cur.fetchone()
+            parts.append(
+                f"## Agent overview\nTotal: {s['total']}, "
+                f"Online (last 10min): {s['online']}, Offline: {s['offline']}"
+            )
+
+            # Offline agents list
+            cur.execute("""
+                SELECT a.hostname, a.fqdn, a.posledni_kontakt, a.verze_agenta,
+                       ag.nazev AS group_name
+                FROM agents a
+                LEFT JOIN agent_groups ag ON a.group_id = ag.id
+                WHERE a.aktivni = true
+                  AND (a.posledni_kontakt < NOW() - INTERVAL '10 minutes'
+                       OR a.posledni_kontakt IS NULL)
+                ORDER BY a.posledni_kontakt DESC NULLS LAST
+                LIMIT 20
+            """)
+            offline_agents = cur.fetchall()
+            if offline_agents:
+                lines = [f"- {r['hostname']} ({r['fqdn'] or 'n/a'}) "
+                         f"group={r['group_name']} last={r['posledni_kontakt']} "
+                         f"ver={r['verze_agenta']}"
+                         for r in offline_agents]
+                parts.append("### Offline agents:\n" + "\n".join(lines))
+
+            # Failed / errored commands (last 24h)
+            cur.execute("""
+                SELECT ac.id, COALESCE(a.hostname, 'broadcast') AS hostname,
+                       ac.command_type, ac.status, ac.created_at,
+                       LEFT(ac.result::text, 300) AS result_preview
+                FROM agent_commands ac
+                LEFT JOIN agents a ON a.id = ac.agent_id
+                WHERE ac.created_at >= NOW() - INTERVAL '24 hours'
+                  AND ac.status IN ('failed', 'error', 'signature_failed')
+                ORDER BY ac.created_at DESC
+                LIMIT 20
+            """)
+            failed_cmds = cur.fetchall()
+            if failed_cmds:
+                lines = [f"- #{r['id']} {r['hostname']} [{r['command_type']}] "
+                         f"{r['status']} at {r['created_at']}: {r['result_preview']}"
+                         for r in failed_cmds]
+                parts.append("## Failed commands (last 24h):\n" + "\n".join(lines))
+
+            # Recent commands (last 24h) overview
+            cur.execute("""
+                SELECT status, COUNT(*) AS n
+                FROM agent_commands
+                WHERE created_at >= NOW() - INTERVAL '24 hours'
+                GROUP BY status ORDER BY n DESC
+            """)
+            cmd_stats = cur.fetchall()
+            if cmd_stats:
+                summary = ", ".join(f"{r['status']}={r['n']}" for r in cmd_stats)
+                parts.append(f"## Commands last 24h: {summary}")
+
+            # Top auth failures last 24h
+            cur.execute("""
+                SELECT ipadresa, COUNT(*) AS cnt
+                FROM auth_failures
+                WHERE importtime >= NOW() - INTERVAL '24 hours'
+                GROUP BY ipadresa
+                ORDER BY cnt DESC
+                LIMIT 15
+            """)
+            auth_top = cur.fetchall()
+            if auth_top:
+                lines = [f"- {r['ipadresa']}: {r['cnt']} attempts" for r in auth_top]
+                parts.append("## Top auth failure IPs (last 24h):\n" + "\n".join(lines))
+
+            # ESET blocks last 24h
+            cur.execute("""
+                SELECT COUNT(*) AS n FROM eset_network_blocks
+                WHERE importtime >= NOW() - INTERVAL '24 hours'
+            """)
+            eset_n = cur.fetchone()["n"]
+            parts.append(f"## ESET network blocks last 24h: {eset_n}")
+
+            # Upstream feed freshness
+            cur.execute("""
+                SELECT nazev, enabled, pocet_zaznamu, posledni_refresh
+                FROM upstream_feeds
+                ORDER BY posledni_refresh DESC NULLS LAST
+            """)
+            feeds = cur.fetchall()
+            if feeds:
+                lines = [f"- {r['nazev']} ({'on' if r['enabled'] else 'off'}): "
+                         f"{r['pocet_zaznamu']} entries, fetched {r['posledni_refresh']}"
+                         for r in feeds]
+                parts.append("## Upstream feeds:\n" + "\n".join(lines))
+
+            # Output lists
+            cur.execute("""
+                SELECT nazev, interval_min, last_generated
+                FROM output_lists
+                ORDER BY last_generated DESC NULLS LAST
+            """)
+            out_lists = cur.fetchall()
+            if out_lists:
+                lines = [f"- {r['nazev']}: last generated {r['last_generated']}, "
+                         f"interval {r['interval_min']}min"
+                         for r in out_lists]
+                parts.append("## Output lists:\n" + "\n".join(lines))
+
+            # Recent agent events (last hour, summary by module)
+            cur.execute("""
+                SELECT module, COUNT(*) AS n, MAX(created_at) AS latest
+                FROM agent_events
+                WHERE created_at >= NOW() - INTERVAL '1 hour'
+                GROUP BY module
+                ORDER BY n DESC
+            """)
+            ev_summary = cur.fetchall()
+            if ev_summary:
+                lines = [f"- {r['module']}: {r['n']} events, latest {r['latest']}"
+                         for r in ev_summary]
+                parts.append("## Agent events last 1h (by module):\n" + "\n".join(lines))
+
+    # Tail error log
+    for log_path, label in [
+        ("/var/log/xiem/api-error.log", "API error log (last 40 lines)"),
+    ]:
+        try:
+            result = _subprocess.run(
+                ["tail", "-n", "40", log_path],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.stdout.strip():
+                snippet = result.stdout[-3000:]
+                parts.append(f"## {label}:\n```\n{snippet}\n```")
+        except Exception:
+            pass
+
+    # Journalctl tails
+    for unit, label in [
+        ("xiem-api", "xiem-api systemd log (last 30 lines)"),
+        ("generate-lists", "generate-lists systemd log (last 20 lines)"),
+    ]:
+        try:
+            result = _subprocess.run(
+                ["journalctl", "-u", unit, "-n", "30", "--no-pager",
+                 "--output=short-iso"],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.stdout.strip():
+                snippet = result.stdout[-3000:]
+                parts.append(f"## {label}:\n```\n{snippet}\n```")
+        except Exception:
+            pass
+
+    return "\n\n".join(parts)
+
+
+def _call_claude(context: str) -> str:
+    import anthropic
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    system_prompt = (
+        "You are an infrastructure monitoring assistant for X9.cz, an MSP company "
+        "operating ~100 Windows servers for clients. "
+        "Analyze the following XIEM (X9 Intrusion & Event Monitor) system data and provide "
+        "a concise status report in Czech language using Markdown formatting. "
+        "Include: 1) Overall health summary (1-2 sentences), "
+        "2) Critical issues or anomalies, "
+        "3) Notable events in the last 24 hours, "
+        "4) Specific actionable recommendations. "
+        "Be concise and practical. Use bullet points and headers. "
+        "If everything looks normal, say so clearly."
+    )
+    msg = client.messages.create(
+        model="claude-opus-4-6",
+        max_tokens=1500,
+        messages=[{
+            "role": "user",
+            "content": (
+                f"Current time: {now_str}\n\n"
+                f"XIEM system data:\n\n{context}"
+            )
+        }],
+        system=system_prompt,
+    )
+    return msg.content[0].text
+
+
+@app.route("/ai-status")
+def ai_status():
+    cache = _AI_STATUS_CACHE
+    age = _time.time() - cache["ts"]
+    force = request.args.get("refresh") == "1"
+
+    if force or age > _AI_STATUS_TTL or cache["content"] is None:
+        if not ANTHROPIC_API_KEY:
+            cache["error"] = "ANTHROPIC_API_KEY neni nastaven (pridej do /etc/xiem/env)."
+            cache["content"] = None
+        else:
+            try:
+                context = _gather_status_context()
+                cache["content"] = _call_claude(context)
+                cache["error"] = None
+                cache["ts"] = _time.time()
+            except Exception as exc:
+                cache["error"] = str(exc)
+
+    age_min = int((_time.time() - cache["ts"]) / 60) if cache["ts"] > 0 else None
+    return render_template(
+        "ai_status.html",
+        content=cache["content"],
+        error=cache["error"],
+        age_min=age_min,
+    )
+
 
 # ============================================================
 
