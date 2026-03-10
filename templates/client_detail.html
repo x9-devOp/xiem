@@ -34,7 +34,7 @@
         <td><span class="badge badge-off">{{ a.group_name or '—' }}</span></td>
         <td class="mono">{{ a.ip_adresa or '—' }}</td>
         <td class="mono" style="color:var(--muted)">{{ a.verze_agenta or '—' }}</td>
-        <td class="mono">{{ a.posledni_kontakt.strftime('%Y-%m-%d %H:%M') if a.posledni_kontakt else '—' }}</td>
+        <td class="mono"><span data-utc="{{ a.posledni_kontakt.isoformat() if a.posledni_kontakt else '' }}">{{ a.posledni_kontakt.strftime('%Y-%m-%d %H:%M') if a.posledni_kontakt else '—' }}</span></td>
       </tr>
       {% endfor %}
     </tbody>
@@ -74,7 +74,7 @@
       <tr>
         <td class="mono" style="color:var(--accent)">{{ ip.ip_cidr }}</td>
         <td style="color:var(--muted);font-size:12px">{{ ip.popis or '—' }}</td>
-        <td class="mono">{{ ip.vytvoreno.strftime('%Y-%m-%d') if ip.vytvoreno else '—' }}</td>
+        <td class="mono"><span data-utc="{{ ip.vytvoreno.isoformat() if ip.vytvoreno else '' }}" data-fmt="date">{{ ip.vytvoreno.strftime('%Y-%m-%d') if ip.vytvoreno else '—' }}</span></td>
         <td>
           <form class="inline" method="POST"
                 action="{{ url_for('client_ip_delete', client_id=client.id, ip_id=ip.id) }}"

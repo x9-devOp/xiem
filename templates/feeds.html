@@ -80,7 +80,7 @@
             </select>
           </form>
         </td>
-        <td class="mono">{{ f.posledni_refresh.strftime('%Y-%m-%d %H:%M') if f.posledni_refresh else '—' }}</td>
+        <td class="mono"><span data-utc="{{ f.posledni_refresh.isoformat() if f.posledni_refresh else '' }}">{{ f.posledni_refresh.strftime('%Y-%m-%d %H:%M') if f.posledni_refresh else '—' }}</span></td>
         <td>
           {% if f.enabled %}
             <span class="badge badge-on">aktivni</span>

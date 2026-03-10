@@ -40,7 +40,7 @@
         </td>
         <td class="mono">{{ a.ip_adresa or '—' }}</td>
         <td class="mono" style="color:var(--muted)">{{ a.verze_agenta or '—' }}</td>
-        <td class="mono">{{ a.posledni_kontakt.strftime('%Y-%m-%d %H:%M') if a.posledni_kontakt else '—' }}</td>
+        <td class="mono"><span data-utc="{{ a.posledni_kontakt.isoformat() if a.posledni_kontakt else '' }}">{{ a.posledni_kontakt.strftime('%Y-%m-%d %H:%M') if a.posledni_kontakt else '—' }}</span></td>
         <td>
           {% if not a.aktivni %}
             <span class="badge badge-off">deaktivovan</span>

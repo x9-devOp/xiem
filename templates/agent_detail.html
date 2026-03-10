@@ -26,7 +26,7 @@
       <tr><td style="color:var(--muted);padding:6px 12px">IP adresa</td><td class="mono">{{ agent.ip_adresa or '—' }}</td></tr>
       <tr><td style="color:var(--muted);padding:6px 12px">Skupina</td><td><span class="badge badge-off">{{ agent.group_name or '—' }}</span></td></tr>
       <tr><td style="color:var(--muted);padding:6px 12px">Verze agenta</td><td class="mono">{{ agent.verze_agenta or '—' }}</td></tr>
-      <tr><td style="color:var(--muted);padding:6px 12px">Posledni kontakt</td><td class="mono">{{ agent.posledni_kontakt.strftime('%Y-%m-%d %H:%M:%S') if agent.posledni_kontakt else '—' }}</td></tr>
+      <tr><td style="color:var(--muted);padding:6px 12px">Posledni kontakt</td><td class="mono"><span data-utc="{{ agent.posledni_kontakt.isoformat() if agent.posledni_kontakt else '' }}" data-fmt="dt-s">{{ agent.posledni_kontakt.strftime('%Y-%m-%d %H:%M:%S') if agent.posledni_kontakt else '—' }}</span></td></tr>
       <tr><td style="color:var(--muted);padding:6px 12px">Status</td><td>
         {% if not agent.aktivni %}
           <span class="badge badge-off">deaktivovan</span>
@@ -116,8 +116,8 @@
           {% elif cmd.status == 'pending' %}<span class="badge badge-off">pending</span>
           {% else %}<span class="badge badge-off">{{ cmd.status }}</span>{% endif %}
         </td>
-        <td class="mono" style="color:var(--muted);font-size:11px">{{ cmd.created_at.strftime('%m-%d %H:%M') if cmd.created_at else '—' }}</td>
-        <td class="mono" style="color:var(--muted);font-size:11px">{{ cmd.executed_at.strftime('%m-%d %H:%M') if cmd.executed_at else '—' }}</td>
+        <td class="mono" style="color:var(--muted);font-size:11px"><span data-utc="{{ cmd.created_at.isoformat() if cmd.created_at else '' }}" data-fmt="short">{{ cmd.created_at.strftime('%m-%d %H:%M') if cmd.created_at else '—' }}</span></td>
+        <td class="mono" style="color:var(--muted);font-size:11px"><span data-utc="{{ cmd.executed_at.isoformat() if cmd.executed_at else '' }}" data-fmt="short">{{ cmd.executed_at.strftime('%m-%d %H:%M') if cmd.executed_at else '—' }}</span></td>
         <td style="max-width:300px">
           {% if cmd.result %}
             {% if cmd.result.error %}
@@ -151,7 +151,7 @@
     <tbody>
       {% for ev in events %}
       <tr>
-        <td class="mono" style="color:var(--muted);font-size:11px;white-space:nowrap">{{ ev.created_at.strftime('%Y-%m-%d %H:%M:%S') if ev.created_at else '—' }}</td>
+        <td class="mono" style="color:var(--muted);font-size:11px;white-space:nowrap"><span data-utc="{{ ev.created_at.isoformat() if ev.created_at else '' }}" data-fmt="dt-s">{{ ev.created_at.strftime('%Y-%m-%d %H:%M:%S') if ev.created_at else '—' }}</span></td>
         <td><span class="badge badge-off">{{ ev.module }}</span></td>
         <td style="max-width:500px">
           <details style="cursor:pointer">

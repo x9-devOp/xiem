@@ -66,7 +66,7 @@
         <td class="mono" style="color:var(--muted)">{{ a.fqdn or '—' }}</td>
         <td><span class="badge badge-off">{{ a.group_name or '—' }}</span></td>
         <td class="mono">{{ a.ip_adresa or '—' }}</td>
-        <td class="mono">{{ a.posledni_kontakt.strftime('%Y-%m-%d %H:%M') if a.posledni_kontakt else '—' }}</td>
+        <td class="mono"><span data-utc="{{ a.posledni_kontakt.isoformat() if a.posledni_kontakt else '' }}">{{ a.posledni_kontakt.strftime('%Y-%m-%d %H:%M') if a.posledni_kontakt else '—' }}</span></td>
         <td>
           {% if a.posledni_kontakt and (now - a.posledni_kontakt).total_seconds() < 3600 %}
             <span class="dot dot-on"></span><span style="color:var(--accent);font-size:12px">online</span>

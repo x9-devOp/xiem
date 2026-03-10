@@ -410,5 +410,28 @@
   {% block content %}{% endblock %}
 </main>
 
+<script>
+(function() {
+  function fmtLocal(iso, fmt) {
+    if (!iso) return null;
+    var d = new Date(iso.indexOf('+') > 10 || iso.endsWith('Z') ? iso : iso + 'Z');
+    if (isNaN(d.getTime())) return null;
+    var y  = d.getFullYear();
+    var mo = String(d.getMonth() + 1).padStart(2, '0');
+    var dd = String(d.getDate()).padStart(2, '0');
+    var h  = String(d.getHours()).padStart(2, '0');
+    var mi = String(d.getMinutes()).padStart(2, '0');
+    var s  = String(d.getSeconds()).padStart(2, '0');
+    if (fmt === 'date')  return y + '-' + mo + '-' + dd;
+    if (fmt === 'short') return mo + '-' + dd + ' ' + h + ':' + mi;
+    if (fmt === 'dt-s')  return y + '-' + mo + '-' + dd + ' ' + h + ':' + mi + ':' + s;
+    return y + '-' + mo + '-' + dd + ' ' + h + ':' + mi;
+  }
+  document.querySelectorAll('[data-utc]').forEach(function(el) {
+    var v = fmtLocal(el.getAttribute('data-utc'), el.getAttribute('data-fmt') || 'dt');
+    if (v) el.textContent = v;
+  });
+})();
+</script>
 </body>
 </html>

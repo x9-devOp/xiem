@@ -41,7 +41,7 @@
         <td class="mono" style="color:var(--muted)">{{ loop.index }}</td>
         <td class="mono" style="color:var(--text-hi)">{{ row.ipadresa }}</td>
         <td class="mono" style="color:var(--accent)">{{ row.pocet }}</td>
-        <td class="mono">{{ row.posledni.strftime('%Y-%m-%d %H:%M') if row.posledni else '—' }}</td>
+        <td class="mono"><span data-utc="{{ row.posledni.isoformat() if row.posledni else '' }}">{{ row.posledni.strftime('%Y-%m-%d %H:%M') if row.posledni else '—' }}</span></td>
       </tr>
       {% else %}
       <tr><td colspan="4" style="color:var(--muted);text-align:center;padding:24px">Zadne udalosti dnes.</td></tr>
@@ -67,7 +67,7 @@
         <td class="mono" style="color:var(--muted)">{{ loop.index }}</td>
         <td class="mono" style="color:var(--text-hi)">{{ row.ipadresa }}</td>
         <td class="mono" style="color:var(--accent)">{{ row.pocet }}</td>
-        <td class="mono">{{ row.posledni.strftime('%Y-%m-%d %H:%M') if row.posledni else '—' }}</td>
+        <td class="mono"><span data-utc="{{ row.posledni.isoformat() if row.posledni else '' }}">{{ row.posledni.strftime('%Y-%m-%d %H:%M') if row.posledni else '—' }}</span></td>
       </tr>
       {% else %}
       <tr><td colspan="4" style="color:var(--muted);text-align:center;padding:24px">Zadne udalosti za poslednich 30 dni.</td></tr>

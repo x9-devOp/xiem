@@ -41,7 +41,7 @@
       <tr>
         <td class="mono" style="color:var(--text-hi)">{{ ip.ipadresa }}</td>
         <td style="color:var(--muted);font-size:12px">{{ ip.poznamka or '—' }}</td>
-        <td class="mono">{{ ip.vytvoreno.strftime('%Y-%m-%d') }}</td>
+        <td class="mono"><span data-utc="{{ ip.vytvoreno.isoformat() if ip.vytvoreno else '' }}" data-fmt="date">{{ ip.vytvoreno.strftime('%Y-%m-%d') }}</span></td>
         <td>
           {% if ip.enabled %}
             <span class="badge badge-on">aktivni</span>

@@ -17,6 +17,7 @@
           <option value="powershell">PowerShell</option>
           <option value="cmd">CMD</option>
           <option value="update">&#8593; Update agenta</option>
+          <option value="change_group">&#8645; Zmena skupiny</option>
           <option value="panic" style="color:#ff3b5c">&#9888; PANIC</option>
         </select>
       </div>
@@ -56,7 +57,16 @@
           {% endfor %}
         </select>
       </div>
-      <div class="form-group">
+      <div class="form-group" id="new-group-field" style="display:none">
+        <label>Nova skupina</label>
+        <select name="new_group_id">
+          <option value="">— vyberte —</option>
+          {% for g in groups %}
+          <option value="{{ g.id }}">{{ g.nazev }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group" id="timeout-field">
         <label>Timeout (s)</label>
         <input type="number" name="timeout_sec" value="60" min="5" max="3600"
                style="width:80px">
@@ -141,10 +151,10 @@
           {% endif %}
         </td>
         <td class="mono" style="color:var(--muted);font-size:11px">
-          {{ cmd.created_at.strftime('%m-%d %H:%M') if cmd.created_at else '—' }}
+          <span data-utc="{{ cmd.created_at.isoformat() if cmd.created_at else '' }}" data-fmt="short">{{ cmd.created_at.strftime('%m-%d %H:%M') if cmd.created_at else '—' }}</span>
         </td>
         <td class="mono" style="color:var(--muted);font-size:11px">
-          {{ cmd.executed_at.strftime('%m-%d %H:%M') if cmd.executed_at else '—' }}
+          <span data-utc="{{ cmd.executed_at.isoformat() if cmd.executed_at else '' }}" data-fmt="short">{{ cmd.executed_at.strftime('%m-%d %H:%M') if cmd.executed_at else '—' }}</span>
         </td>
         <td style="max-width:320px">
           {% if cmd.result %}
@@ -189,13 +199,14 @@ function updateCmdType() {
   var t = document.getElementById('cmd-type').value;
   var isPanic  = t === 'panic';
   var isUpdate = t === 'update';
-  var isScript = t === 'powershell' || t === 'cmd';
-  document.getElementById('panic-fields').style.display  = isPanic  ? 'flex'  : 'none';
-  document.getElementById('panic-warning').style.display = isPanic  ? 'block' : 'none';
-  document.getElementById('update-info').style.display   = isUpdate ? 'block' : 'none';
-  // hide script area for update
-  document.querySelector('textarea[name=script]').closest('.form-group').style.display = isUpdate ? 'none' : 'flex';
-  document.getElementById('submit-btn').textContent   = isPanic ? '⚠ Odeslat PANIC' : isUpdate ? '↑ Odeslat UPDATE' : '▶ Odeslat';
+  var isCG     = t === 'change_group';
+  document.getElementById('panic-fields').style.display    = isPanic  ? 'flex'  : 'none';
+  document.getElementById('panic-warning').style.display   = isPanic  ? 'block' : 'none';
+  document.getElementById('update-info').style.display     = isUpdate ? 'block' : 'none';
+  document.getElementById('new-group-field').style.display = isCG     ? 'flex'  : 'none';
+  document.getElementById('timeout-field').style.display   = isCG     ? 'none'  : 'flex';
+  document.querySelector('textarea[name=script]').closest('.form-group').style.display = (isUpdate || isCG) ? 'none' : 'flex';
+  document.getElementById('submit-btn').textContent   = isPanic ? '\u26a0 Odeslat PANIC' : isUpdate ? '\u2191 Odeslat UPDATE' : isCG ? '\u21bb Zmenit skupinu' : '\u25b6 Odeslat';
   document.getElementById('submit-btn').style.background  = isPanic ? 'var(--danger)' : '';
   document.getElementById('submit-btn').style.borderColor = isPanic ? 'var(--danger)' : '';
   document.getElementById('submit-btn').style.color       = isPanic ? '#fff' : '';

@@ -51,7 +51,7 @@
           {{ c.ip_count }} IP{% if c.ip_count == 0 %} <span style="font-size:11px;color:var(--muted)">(neomezeno)</span>{% endif %}
         </td>
         <td class="mono" style="color:var(--muted)">{{ c.list_count }}</td>
-        <td class="mono">{{ c.vytvoreno.strftime('%Y-%m-%d') if c.vytvoreno else '—' }}</td>
+        <td class="mono"><span data-utc="{{ c.vytvoreno.isoformat() if c.vytvoreno else '' }}" data-fmt="date">{{ c.vytvoreno.strftime('%Y-%m-%d') if c.vytvoreno else '—' }}</span></td>
         <td>
           <div style="display:flex;gap:6px">
             <a href="{{ url_for('client_detail', client_id=c.id) }}" class="btn btn-ghost btn-sm">⚙ Detail</a>

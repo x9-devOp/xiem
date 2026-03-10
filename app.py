@@ -1399,13 +1399,20 @@ def commands_list():
 @app.route("/commands/add", methods=["POST"])
 def command_add():
     command_type = request.form.get("command_type", "powershell")
-    if command_type not in ("powershell", "cmd", "panic", "update"):
+    if command_type not in ("powershell", "cmd", "panic", "update", "change_group"):
         flash("Neplatny typ prikazu.", "error")
         return redirect(url_for("commands_list"))
 
     # Build payload based on command type
     if command_type == "update":
         payload = {}
+    elif command_type == "change_group":
+        try:
+            new_group_id = int(request.form.get("new_group_id", ""))
+        except (ValueError, TypeError):
+            flash("Vyberte cilovou skupinu.", "error")
+            return redirect(url_for("commands_list"))
+        payload = {"new_group_id": new_group_id}
     elif command_type == "panic":
         script         = request.form.get("script", "").strip()
         retry_interval = request.form.get("retry_interval", "5m").strip()
@@ -1455,6 +1462,8 @@ def command_add():
         flash("Neplatny cil.", "error")
         return redirect(url_for("commands_list"))
 
+    cg_done = False
+    sig = None
     try:
         with get_db() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -1468,14 +1477,40 @@ def command_add():
                       command_type, psycopg2.extras.Json(payload)))
                 cmd_id = cur.fetchone()["id"]
 
-                sig = _sign_command(cmd_id, command_type, payload)
-                if sig:
-                    cur.execute("UPDATE agent_commands SET signature = %s WHERE id = %s",
-                                (sig, cmd_id))
+                if command_type == "change_group":
+                    ng = payload["new_group_id"]
+                    if agent_id:
+                        cur.execute("UPDATE agents SET group_id = %s WHERE id = %s",
+                                    (ng, agent_id))
+                    elif group_id:
+                        cur.execute("UPDATE agents SET group_id = %s WHERE group_id = %s",
+                                    (ng, group_id))
+                    elif client_id:
+                        cur.execute("UPDATE agents SET group_id = %s WHERE client_id = %s",
+                                    (ng, client_id))
+                    elif target_all:
+                        cur.execute("UPDATE agents SET group_id = %s WHERE aktivni = true",
+                                    (ng,))
+                    cg_rows = cur.rowcount
+                    cg_done = True
+                    cg_result = {"output": f"Group changed for {cg_rows} agent(s).",
+                                 "exit_code": 0, "error": None}
+                    cur.execute(
+                        "UPDATE agent_commands SET status = 'completed', executed_at = now(),"
+                        " result = %s WHERE id = %s",
+                        (psycopg2.extras.Json(cg_result), cmd_id))
                 else:
-                    app.logger.warning("Command %d created WITHOUT signature (key missing?)", cmd_id)
+                    sig = _sign_command(cmd_id, command_type, payload)
+                    if sig:
+                        cur.execute("UPDATE agent_commands SET signature = %s WHERE id = %s",
+                                    (sig, cmd_id))
+                    else:
+                        app.logger.warning("Command %d created WITHOUT signature (key missing?)", cmd_id)
 
-        flash(f"Prikaz #{cmd_id} odeslán{'.' if sig else ' (BEZ podpisu — zkontroluj klic).'}", "ok" if sig else "error")
+        if cg_done:
+            flash(f"Skupina zmenena. Zaznam #{cmd_id}.", "ok")
+        else:
+            flash(f"Prikaz #{cmd_id} odeslán{'.' if sig else ' (BEZ podpisu — zkontroluj klic).'}", "ok" if sig else "error")
     except Exception as e:
         flash(f"Chyba: {e}", "error")
 

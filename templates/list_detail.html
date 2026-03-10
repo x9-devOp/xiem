@@ -25,7 +25,7 @@
     </form>
     {% if lst.last_generated %}
       <span style="font-size:11px;color:var(--muted)">
-        naposledy: {{ lst.last_generated.strftime('%Y-%m-%d %H:%M') }}
+        naposledy: <span data-utc="{{ lst.last_generated.isoformat() if lst.last_generated else '' }}">{{ lst.last_generated.strftime('%Y-%m-%d %H:%M') }}</span>
       </span>
     {% endif %}
   </div>
