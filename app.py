@@ -170,17 +170,27 @@ def agent_register():
                 return jsonify({"error": f"unknown group: {group_name}"}), 400
 
             token = str(uuid.uuid4())
-            cur.execute("""
-                INSERT INTO agents (token, hostname, fqdn, group_id, ip_adresa, verze_agenta)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT (hostname, group_id) DO UPDATE
-                    SET token        = EXCLUDED.token,
-                        fqdn         = EXCLUDED.fqdn,
-                        ip_adresa    = EXCLUDED.ip_adresa,
-                        verze_agenta = EXCLUDED.verze_agenta,
-                        aktivni      = true
-                RETURNING token
-            """, (token, hostname, fqdn or None, group_row["id"], client_ip, agent_version))
+            # Find existing agent: by fqdn (globally unique) or hostname+group (no-fqdn agents)
+            if fqdn:
+                cur.execute("SELECT id FROM agents WHERE fqdn = %s", (fqdn,))
+            else:
+                cur.execute(
+                    "SELECT id FROM agents WHERE hostname = %s AND group_id = %s AND fqdn IS NULL",
+                    (hostname, group_row["id"]))
+            existing = cur.fetchone()
+
+            if existing:
+                cur.execute("""
+                    UPDATE agents SET token=%s, hostname=%s, fqdn=%s, ip_adresa=%s,
+                                      verze_agenta=%s, group_id=%s, aktivni=true
+                    WHERE id=%s RETURNING token
+                """, (token, hostname, fqdn or None, client_ip, agent_version,
+                      group_row["id"], existing["id"]))
+            else:
+                cur.execute("""
+                    INSERT INTO agents (token, hostname, fqdn, group_id, ip_adresa, verze_agenta)
+                    VALUES (%s, %s, %s, %s, %s, %s) RETURNING token
+                """, (token, hostname, fqdn or None, group_row["id"], client_ip, agent_version))
 
             row = cur.fetchone()
             if row is None:
