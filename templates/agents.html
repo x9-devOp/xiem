@@ -64,6 +64,11 @@
               </select>
               <button type="submit" class="btn btn-ghost btn-sm">↵</button>
             </form>
+            <form class="inline" method="POST"
+                  action="{{ url_for('agent_delete', agent_id=a.id) }}"
+                  onsubmit="return confirm('Smazat agenta {{ a.hostname }}?')">
+              <button class="btn btn-danger btn-sm">✕</button>
+            </form>
           </div>
         </td>
       </tr>

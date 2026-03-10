@@ -826,6 +826,29 @@ def source_toggle(source_id):
     return redirect(url_for("sources_list"))
 
 
+@app.route("/sources/<int:source_id>/delete", methods=["POST"])
+def source_delete(source_id):
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT nazev, source_type, parametry FROM sources WHERE id = %s", (source_id,))
+            src = cur.fetchone()
+            if not src:
+                flash("Zdroj nenalezen.", "error")
+                return redirect(url_for("sources_list"))
+            if src["source_type"] == "agent_native":
+                flash("Systemove zdroje (agent_native) nelze smazat.", "error")
+                return redirect(url_for("sources_list"))
+            # For upstream_http also delete upstream_feeds row (cascades to entries)
+            if src["source_type"] == "upstream_http":
+                fid = (src["parametry"] or {}).get("upstream_feed_id")
+                if fid:
+                    cur.execute("DELETE FROM upstream_feed_entries WHERE feed_id = %s", (fid,))
+                    cur.execute("DELETE FROM upstream_feeds WHERE id = %s", (fid,))
+            cur.execute("DELETE FROM sources WHERE id = %s", (source_id,))
+    flash(f"Zdroj '{src['nazev']}' smazan.", "ok")
+    return redirect(url_for("sources_list"))
+
+
 @app.route("/sources/<int:source_id>/refresh", methods=["POST"])
 def source_refresh(source_id):
     with get_db() as conn:
@@ -1210,6 +1233,20 @@ def agents_list():
             cur.execute("SELECT id, nazev FROM clients ORDER BY nazev")
             clients = cur.fetchall()
     return render_template("agents.html", agents=agents, now=now, clients=clients)
+
+
+@app.route("/agents/<int:agent_id>/delete", methods=["POST"])
+def agent_delete(agent_id):
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT hostname FROM agents WHERE id = %s", (agent_id,))
+            row = cur.fetchone()
+            if not row:
+                flash("Agent nenalezen.", "error")
+                return redirect(url_for("agents_list"))
+            cur.execute("DELETE FROM agents WHERE id = %s", (agent_id,))
+    flash(f"Agent '{row['hostname']}' smazan.", "ok")
+    return redirect(url_for("agents_list"))
 
 
 @app.route("/agents/<int:agent_id>/toggle", methods=["POST"])
