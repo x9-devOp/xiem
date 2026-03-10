@@ -434,52 +434,56 @@
 
 /* -------------------------------------------------------
  * xiemTable(tableId, colDefs, opts)
- * Adds sort, filter and group-by to any <table>.
+ * Adds sort, multi-level group-by and filter to any <table>.
  *
  * colDefs: array per column — {sort, filter, group, domain}
- *   sort   (bool, default true)  – clickable header sorts
- *   filter (bool, default true)  – filter input in header
- *   group  (bool, default true)  – ⊞ group-by icon
- *   domain (bool, default false) – for FQDN: group key = everything after first dot
+ *   sort   (bool, default true)  – clickable header sorts (cycles none/asc/desc)
+ *   filter (bool, default true)  – filter input in sub-header row
+ *   group  (bool, default true)  – ⊞ group-by icon; multiple columns supported
+ *   domain (bool, default false) – group key = everything after first dot (for FQDN)
  *
- * opts: {defaultGroupCol, defaultSortCol, defaultSortDir}
+ * opts: {defaultGroupCols, defaultSortCol, defaultSortDir}
+ *   defaultGroupCols: array of column indices, e.g. [1, 2]
  *
- * Persists sort/group state in localStorage keyed by tableId.
+ * State (sort, group, filters) persisted in localStorage keyed by tableId.
  * ------------------------------------------------------- */
 (function() {
+  var SUP = ['', '\u00b9', '\u00b2', '\u00b3', '\u2074', '\u2075'];  // ¹²³⁴⁵
+
   function xiemTable(tableId, colDefs, opts) {
     opts = opts || {};
-    var table   = document.getElementById(tableId);
+    var table = document.getElementById(tableId);
     if (!table) return;
-    var thead   = table.querySelector('thead');
-    var tbody   = table.querySelector('tbody');
-    var ths     = Array.prototype.slice.call(thead.querySelectorAll('tr:first-child th'));
-    var ncols   = ths.length;
+    var thead = table.querySelector('thead');
+    var tbody = table.querySelector('tbody');
+    var ths   = Array.prototype.slice.call(thead.querySelectorAll('tr:first-child th'));
+    var ncols = ths.length;
 
-    // --- restore or init state ---
+    // --- state (restored from localStorage or initialised from opts) ---
     var stKey = 'ximTbl_' + tableId;
     var st;
     try { st = JSON.parse(localStorage.getItem(stKey) || 'null'); } catch(e) { st = null; }
     if (!st) st = {
-      sortCol:  opts.defaultSortCol  != null ? opts.defaultSortCol  : null,
-      sortDir:  opts.defaultSortDir  != null ? opts.defaultSortDir  : 1,
-      groupCol: opts.defaultGroupCol != null ? opts.defaultGroupCol : null,
-      filters:  {}
+      sortCol:   opts.defaultSortCol   != null ? opts.defaultSortCol  : null,
+      sortDir:   opts.defaultSortDir   != null ? opts.defaultSortDir  : 1,
+      groupCols: opts.defaultGroupCols != null ? opts.defaultGroupCols.slice() : [],
+      filters:   {}
     };
-    function saveState() {
-      try { localStorage.setItem(stKey, JSON.stringify(st)); } catch(e) {}
+    // migrate old single-groupCol state
+    if (st.groupCol !== undefined && st.groupCols === undefined) {
+      st.groupCols = st.groupCol != null ? [st.groupCol] : [];
+      delete st.groupCol;
     }
+    function save() { try { localStorage.setItem(stKey, JSON.stringify(st)); } catch(e) {} }
 
-    // --- collect row data once ---
+    // --- collect row data once from DOM ---
     var rows = [];
     Array.prototype.forEach.call(tbody.querySelectorAll('tr'), function(tr) {
-      var tds  = Array.prototype.slice.call(tr.querySelectorAll('td'));
-      var vals = tds.map(function(td, i) {
-        // prefer explicit data-sort, then first data-utc inside, then textContent
+      var vals = Array.prototype.map.call(tr.querySelectorAll('td'), function(td, i) {
         var v = td.getAttribute('data-sort');
         if (v === null) {
-          var utcEl = td.querySelector('[data-utc]');
-          v = utcEl ? (utcEl.getAttribute('data-utc') || '') : td.textContent.trim();
+          var u = td.querySelector('[data-utc]');
+          v = u ? (u.getAttribute('data-utc') || '') : td.textContent.trim();
         }
         return v;
       });
@@ -489,18 +493,17 @@
     function groupKey(row, col) {
       var v = row.vals[col] || '';
       if ((colDefs[col] || {}).domain) {
-        // extract everything after first dot as domain
-        var dot = v.indexOf('.');
-        return dot >= 0 ? v.slice(dot + 1) : (v || '—');
+        var d = v.indexOf('.');
+        return d >= 0 ? v.slice(d + 1) : (v || '—');
       }
       return v || '—';
     }
 
-    // --- build enhanced header ---
+    // --- build enhanced header cells ---
     ths.forEach(function(th, i) {
-      var def = colDefs[i] || {};
+      var def   = colDefs[i] || {};
       var inner = document.createElement('span');
-      inner.style.cssText = 'display:inline-flex;align-items:center;gap:5px;width:100%';
+      inner.style.cssText = 'display:inline-flex;align-items:center;gap:4px;width:100%';
       inner.innerHTML = th.innerHTML;
       th.innerHTML = '';
       th.appendChild(inner);
@@ -509,35 +512,32 @@
       if (def.sort !== false) {
         var si = document.createElement('span');
         si.className = 'xi-sort';
-        si.style.cssText = 'font-size:9px;color:var(--muted);margin-left:2px;flex-shrink:0';
+        si.style.cssText = 'font-size:9px;color:var(--muted);flex-shrink:0';
         si.textContent = '⇕';
         inner.appendChild(si);
         th.style.cursor = 'pointer';
         th.style.userSelect = 'none';
         th.addEventListener('click', function(e) {
           if (e.target.classList.contains('xi-grp')) return;
-          // cycle: none → asc → desc → none
-          if (st.sortCol !== i) {
-            st.sortCol = i; st.sortDir = 1;
-          } else if (st.sortDir === 1) {
-            st.sortDir = -1;
-          } else {
-            st.sortCol = null; st.sortDir = 1;
-          }
-          saveState(); render();
+          if (st.sortCol !== i)      { st.sortCol = i; st.sortDir = 1; }
+          else if (st.sortDir === 1) { st.sortDir = -1; }
+          else                       { st.sortCol = null; st.sortDir = 1; }
+          save(); render();
         });
       }
 
       if (def.group !== false && i < ncols - 1) {
         var gi = document.createElement('span');
         gi.className = 'xi-grp';
-        gi.title = 'Group by this column';
-        gi.style.cssText = 'font-size:10px;cursor:pointer;color:var(--muted);padding:1px 4px;border-radius:3px;flex-shrink:0;margin-left:auto';
+        gi.title = 'Group by (click to add/remove; order = click order)';
+        gi.style.cssText = 'font-size:10px;cursor:pointer;color:var(--muted);padding:1px 3px;border-radius:3px;flex-shrink:0;margin-left:auto';
         gi.textContent = '⊞';
         gi.addEventListener('click', function(e) {
           e.stopPropagation();
-          st.groupCol = (st.groupCol === i) ? null : i;
-          saveState(); render();
+          var idx = st.groupCols.indexOf(i);
+          if (idx >= 0) st.groupCols.splice(idx, 1);
+          else          st.groupCols.push(i);
+          save(); render();
         });
         inner.appendChild(gi);
       }
@@ -556,12 +556,12 @@
         inp.placeholder = '⌕';
         inp.style.cssText = 'width:100%;padding:3px 6px;font-size:11px;background:var(--surface);border:1px solid var(--border);border-radius:3px;color:var(--text);outline:none';
         inp.value = st.filters[i] || '';
-        inp.addEventListener('focus', function() { this.style.borderColor='var(--accent)'; });
-        inp.addEventListener('blur',  function() { this.style.borderColor='var(--border)'; });
+        inp.addEventListener('focus', function() { this.style.borderColor = 'var(--accent)'; });
+        inp.addEventListener('blur',  function() { this.style.borderColor = 'var(--border)'; });
         inp.addEventListener('input', function() {
           if (this.value) st.filters[i] = this.value.toLowerCase();
           else delete st.filters[i];
-          saveState(); render();
+          save(); render();
         });
         ftd.appendChild(inp);
       }
@@ -571,22 +571,23 @@
 
     // --- render ---
     function render() {
-      // update sort icons
+      // sort icon
       ths.forEach(function(th, i) {
         var si = th.querySelector('.xi-sort');
         if (!si) return;
-        var active = st.sortCol === i;
-        si.textContent = active ? (st.sortDir === 1 ? '▲' : '▼') : '⇕';
-        si.style.color  = active ? 'var(--accent)' : 'var(--muted)';
+        var on = st.sortCol === i;
+        si.textContent = on ? (st.sortDir === 1 ? '▲' : '▼') : '⇕';
+        si.style.color  = on ? 'var(--accent)' : 'var(--muted)';
       });
-      // update group icons
+      // group icon — show order number when active
       ths.forEach(function(th, i) {
         var gi = th.querySelector('.xi-grp');
         if (!gi) return;
-        var active = st.groupCol === i;
-        gi.style.color      = active ? 'var(--accent)'             : 'var(--muted)';
-        gi.style.background = active ? 'rgba(0,212,170,0.12)'      : '';
-        gi.textContent      = active ? '⊟' : '⊞';
+        var pos = st.groupCols.indexOf(i);
+        var on  = pos >= 0;
+        gi.style.color      = on ? 'var(--accent)'        : 'var(--muted)';
+        gi.style.background = on ? 'rgba(0,212,170,0.12)' : '';
+        gi.textContent      = on ? '⊟' + (SUP[pos + 1] || '') : '⊞';
       });
 
       // filter
@@ -597,60 +598,70 @@
         });
       });
 
-      // sort (applied before or after grouping as secondary sort)
-      function sortRows(arr, col, dir) {
-        if (col === null) return arr;
-        return arr.slice().sort(function(a, b) {
-          var av = a.vals[col] || '', bv = b.vals[col] || '';
-          return av < bv ? -dir : av > bv ? dir : 0;
-        });
-      }
-
       tbody.innerHTML = '';
 
-      if (st.groupCol !== null) {
-        // sort by group key first, secondary by sortCol
-        var gc = st.groupCol;
+      if (st.groupCols.length > 0) {
+        var gcols = st.groupCols;
+        // sort: primary by group cols in order, secondary by sortCol
         var sorted = visible.slice().sort(function(a, b) {
-          var ag = groupKey(a, gc), bg2 = groupKey(b, gc);
-          if (ag < bg2) return -1;
-          if (ag > bg2) return 1;
-          if (st.sortCol !== null && st.sortCol !== gc) {
+          for (var k = 0; k < gcols.length; k++) {
+            var ag = groupKey(a, gcols[k]), bg = groupKey(b, gcols[k]);
+            if (ag < bg) return -1;
+            if (ag > bg) return 1;
+          }
+          if (st.sortCol !== null) {
             var av = a.vals[st.sortCol] || '', bv = b.vals[st.sortCol] || '';
             return av < bv ? -st.sortDir : av > bv ? st.sortDir : 0;
           }
           return 0;
         });
-        var lastGrp = null;
+
+        // render group headers on level change
+        var lastKeys = gcols.map(function() { return null; });
+        // indent + style per level
+        var levelStyle = [
+          'padding:5px 12px;font-size:11px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:0.8px;border-top:1px solid var(--border)',
+          'padding:3px 24px;font-size:10px;font-weight:600;color:var(--muted);border-top:1px solid rgba(37,42,53,0.4)',
+          'padding:3px 36px;font-size:10px;color:var(--muted);border-top:none'
+        ];
         sorted.forEach(function(row) {
-          var grp = groupKey(row, gc);
-          if (grp !== lastGrp) {
-            var gtr = document.createElement('tr');
-            gtr.style.cssText = 'background:rgba(0,212,170,0.04);pointer-events:none';
-            var gtd = document.createElement('td');
-            gtd.colSpan = ncols;
-            gtd.style.cssText = 'padding:5px 12px;font-size:11px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:0.8px;border-top:1px solid var(--border)';
-            gtd.textContent = grp;
-            gtr.appendChild(gtd);
-            tbody.appendChild(gtr);
-            lastGrp = grp;
+          var changedFrom = -1;
+          for (var k = 0; k < gcols.length; k++) {
+            if (groupKey(row, gcols[k]) !== lastKeys[k]) { changedFrom = k; break; }
+          }
+          if (changedFrom >= 0) {
+            for (var k = changedFrom; k < gcols.length; k++) {
+              var gk = groupKey(row, gcols[k]);
+              lastKeys[k] = gk;
+              var gtr = document.createElement('tr');
+              gtr.style.cssText = 'background:rgba(0,212,170,0.03);pointer-events:none';
+              var gtd = document.createElement('td');
+              gtd.colSpan = ncols;
+              gtd.style.cssText = levelStyle[Math.min(k, levelStyle.length - 1)];
+              // prefix with column name for deeper levels
+              gtd.textContent = k === 0 ? gk : (ths[gcols[k]].textContent.trim().replace(/[⊞⊟⇕▲▼¹²³⁴⁵]/g, '').trim() + ': ' + gk);
+              gtr.appendChild(gtd);
+              tbody.appendChild(gtr);
+            }
           }
           tbody.appendChild(row.tr);
         });
       } else {
-        sortRows(visible, st.sortCol, st.sortDir).forEach(function(r) {
-          tbody.appendChild(r.tr);
-        });
+        // no grouping — just sort
+        var sorted = (st.sortCol !== null)
+          ? visible.slice().sort(function(a, b) {
+              var av = a.vals[st.sortCol] || '', bv = b.vals[st.sortCol] || '';
+              return av < bv ? -st.sortDir : av > bv ? st.sortDir : 0;
+            })
+          : visible;
+        sorted.forEach(function(r) { tbody.appendChild(r.tr); });
       }
 
       if (visible.length === 0) {
         var etr = document.createElement('tr');
         var etd = document.createElement('td');
-        etd.colSpan = ncols;
-        etd.style.cssText = 'color:var(--muted);text-align:center;padding:24px';
-        etd.textContent = 'Zadne zaznamy.';
-        etr.appendChild(etd);
-        tbody.appendChild(etr);
+        etd.colSpan = ncols; etd.style.cssText = 'color:var(--muted);text-align:center;padding:24px';
+        etd.textContent = 'Zadne zaznamy.'; etr.appendChild(etd); tbody.appendChild(etr);
       }
     }
 

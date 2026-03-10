@@ -88,12 +88,12 @@ document.addEventListener('DOMContentLoaded', function() {
     {sort: true,  filter: true,  group: true, domain: true}, // FQDN (group key = domain)
     {sort: true,  filter: true,  group: true},               // Skupina
     {sort: true,  filter: true,  group: true},               // Klient
-    {sort: true,  filter: true,  group: false},              // IP adresa
+    {sort: true,  filter: true,  group: true},               // IP adresa
     {sort: true,  filter: false, group: true},               // Verze
     {sort: true,  filter: false, group: false},              // Posledni kontakt
     {sort: true,  filter: false, group: true},               // Status
     {sort: false, filter: false, group: false}               // Akce
-  ], {defaultGroupCol: 1});
+  ], {defaultGroupCols: [1, 2]});  // default: group by domain, then skupina
 });
 </script>
 {% endblock %}
