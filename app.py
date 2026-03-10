@@ -588,6 +588,240 @@ def dashboard():
 # Upstream Feeds
 # ============================================================
 
+# ============================================================
+# Sources (unified source registry)
+# ============================================================
+
+_WINDOW_INTERVALS = {
+    "1h":  "1 hour",
+    "24h": "24 hours",
+    "7d":  "7 days",
+    "30d": "30 days",
+}
+
+
+@app.route("/sources")
+def sources_list():
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT * FROM sources ORDER BY source_type, nazev")
+            rows = cur.fetchall()
+            cur.execute("""
+                SELECT 'auth_failures' AS tbl,
+                       COUNT(*) AS total,
+                       COUNT(*) FILTER (WHERE importtime >= now()-'24h'::interval) AS h24,
+                       MAX(importtime) AS latest
+                FROM auth_failures
+                UNION ALL
+                SELECT 'eset_network_blocks',
+                       COUNT(*),
+                       COUNT(*) FILTER (WHERE importtime >= now()-'24h'::interval),
+                       MAX(importtime)
+                FROM eset_network_blocks
+            """)
+            native_stats = {r["tbl"]: r for r in cur.fetchall()}
+            cur.execute("SELECT id, pocet_zaznamu, posledni_refresh FROM upstream_feeds")
+            feed_stats = {r["id"]: r for r in cur.fetchall()}
+
+    sources = []
+    for s in rows:
+        s = dict(s)
+        p = s.get("parametry") or {}
+        if s["source_type"] == "agent_native":
+            st = native_stats.get(p.get("table", ""), {})
+            s["total_count"]   = st.get("total", 0)
+            s["h24_count"]     = st.get("h24", 0)
+            s["last_activity"] = st.get("latest")
+        elif s["source_type"] == "upstream_http":
+            st = feed_stats.get(p.get("upstream_feed_id"), {})
+            s["total_count"]   = st.get("pocet_zaznamu", 0)
+            s["h24_count"]     = None
+            s["last_activity"] = st.get("posledni_refresh")
+        sources.append(s)
+
+    return render_template("sources.html", sources=sources)
+
+
+@app.route("/sources/add-feed", methods=["POST"])
+def source_add_feed():
+    nazev     = request.form.get("nazev", "").strip()
+    url       = request.form.get("url", "").strip()
+    list_type = request.form.get("list_type", "ip")
+    poznamka  = request.form.get("poznamka", "").strip()
+
+    if not nazev or not url:
+        flash("Nazev a URL jsou povinne.", "error")
+        return redirect(url_for("sources_list"))
+    if list_type not in ("ip", "fqdn", "url"):
+        list_type = "ip"
+
+    try:
+        with get_db() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute("""
+                    INSERT INTO upstream_feeds (nazev, url, list_type, poznamka)
+                    VALUES (%s, %s, %s, %s) RETURNING id, vaha
+                """, (nazev, url, list_type, poznamka or None))
+                feed = cur.fetchone()
+                cur.execute("""
+                    INSERT INTO sources (nazev, source_type, parametry, vaha_default)
+                    VALUES (%s, 'upstream_http', %s, %s)
+                """, (nazev, psycopg2.extras.Json({"upstream_feed_id": feed["id"]}),
+                      feed["vaha"]))
+        flash(f"Feed '{nazev}' pridan.", "ok")
+    except psycopg2.errors.UniqueViolation:
+        flash("Feed s touto URL uz existuje.", "error")
+    except Exception as e:
+        flash(f"Chyba: {e}", "error")
+    return redirect(url_for("sources_list"))
+
+
+@app.route("/sources/<int:source_id>/toggle", methods=["POST"])
+def source_toggle(source_id):
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                UPDATE sources SET enabled = NOT enabled
+                WHERE id = %s RETURNING source_type, parametry, enabled
+            """, (source_id,))
+            row = cur.fetchone()
+            if row and row["source_type"] == "upstream_http":
+                fid = (row["parametry"] or {}).get("upstream_feed_id")
+                if fid:
+                    cur.execute("UPDATE upstream_feeds SET enabled = %s WHERE id = %s",
+                                (row["enabled"], fid))
+    return redirect(url_for("sources_list"))
+
+
+@app.route("/sources/<int:source_id>/refresh", methods=["POST"])
+def source_refresh(source_id):
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT parametry FROM sources WHERE id = %s AND source_type = 'upstream_http'",
+                        (source_id,))
+            row = cur.fetchone()
+    if not row:
+        flash("Zdroj nenalezen nebo neni upstream_http.", "error")
+        return redirect(url_for("source_detail", source_id=source_id))
+    fid = (row["parametry"] or {}).get("upstream_feed_id")
+    if fid:
+        # Delegate to existing feed_refresh logic but redirect back here
+        with get_db() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute("SELECT * FROM upstream_feeds WHERE id = %s", (fid,))
+                feed = cur.fetchone()
+        if feed:
+            try:
+                resp = requests.get(feed["url"], timeout=30)
+                resp.raise_for_status()
+                lines = [l.strip() for l in resp.text.splitlines()
+                         if l.strip() and not l.strip().startswith("#")]
+                valid = [l for l in lines if validate_zaznam(l, feed["list_type"])]
+                with get_db() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("DELETE FROM upstream_feed_entries WHERE feed_id = %s", (fid,))
+                        if valid:
+                            psycopg2.extras.execute_values(cur,
+                                "INSERT INTO upstream_feed_entries (feed_id, zaznam) VALUES %s",
+                                [(fid, v) for v in valid])
+                        cur.execute("""
+                            UPDATE upstream_feeds
+                            SET posledni_refresh = now(), pocet_zaznamu = %s WHERE id = %s
+                        """, (len(valid), fid))
+                flash(f"Refresh OK: {len(valid)} zaznamu.", "ok")
+            except Exception as e:
+                flash(f"Refresh selhal: {e}", "error")
+    return redirect(url_for("source_detail", source_id=source_id))
+
+
+@app.route("/sources/<int:source_id>")
+def source_detail(source_id):
+    window = request.args.get("w", "24h")
+    if window not in _WINDOW_INTERVALS:
+        window = "24h"
+    interval = _WINDOW_INTERVALS[window]
+
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT * FROM sources WHERE id = %s", (source_id,))
+            source = cur.fetchone()
+            if source is None:
+                return "Zdroj nenalezen", 404
+
+            p = source["parametry"] or {}
+            stats = {}
+            top_ips = []
+            recent = []
+            entries = []
+            feed = None
+
+            if source["source_type"] == "agent_native":
+                tbl = p.get("table", "")
+
+                if tbl == "auth_failures":
+                    cur.execute("""
+                        SELECT COUNT(*) total,
+                               COUNT(*) FILTER (WHERE importtime >= now()-'24h'::interval)   h24,
+                               COUNT(*) FILTER (WHERE importtime >= now()-'7 days'::interval) h7d,
+                               COUNT(*) FILTER (WHERE importtime >= now()-'30 days'::interval) h30d
+                        FROM auth_failures
+                    """)
+                    stats = cur.fetchone()
+                    cur.execute("""
+                        SELECT ipadresa, COUNT(*) pocet, MAX(importtime) posledni
+                        FROM auth_failures
+                        WHERE importtime >= now() - %s::interval
+                        GROUP BY ipadresa ORDER BY pocet DESC LIMIT 50
+                    """, (interval,))
+                    top_ips = cur.fetchall()
+                    cur.execute("""
+                        SELECT (datum+cas) AS ts, ipadresa, uzivatel, sourceserver
+                        FROM auth_failures ORDER BY importtime DESC LIMIT 50
+                    """)
+                    recent = cur.fetchall()
+
+                elif tbl == "eset_network_blocks":
+                    cur.execute("""
+                        SELECT COUNT(*) total,
+                               COUNT(*) FILTER (WHERE importtime >= now()-'24h'::interval)   h24,
+                               COUNT(*) FILTER (WHERE importtime >= now()-'7 days'::interval) h7d,
+                               COUNT(*) FILTER (WHERE importtime >= now()-'30 days'::interval) h30d
+                        FROM eset_network_blocks
+                    """)
+                    stats = cur.fetchone()
+                    cur.execute("""
+                        SELECT ipadresa, COUNT(*) pocet, MAX(cas_udalosti) posledni
+                        FROM eset_network_blocks
+                        WHERE importtime >= now() - %s::interval
+                        GROUP BY ipadresa ORDER BY pocet DESC LIMIT 50
+                    """, (interval,))
+                    top_ips = cur.fetchall()
+                    cur.execute("""
+                        SELECT cas_udalosti AS ts, ipadresa, akce, protokol, sourceserver
+                        FROM eset_network_blocks ORDER BY cas_udalosti DESC LIMIT 50
+                    """)
+                    recent = cur.fetchall()
+
+            elif source["source_type"] == "upstream_http":
+                fid = p.get("upstream_feed_id")
+                if fid:
+                    cur.execute("SELECT * FROM upstream_feeds WHERE id = %s", (fid,))
+                    feed = cur.fetchone()
+                    if feed:
+                        stats = {"total": feed["pocet_zaznamu"],
+                                 "last_refresh": feed["posledni_refresh"]}
+                    cur.execute("""
+                        SELECT zaznam FROM upstream_feed_entries
+                        WHERE feed_id = %s ORDER BY zaznam LIMIT 500
+                    """, (fid,))
+                    entries = cur.fetchall()
+
+    return render_template("source_detail.html",
+                           source=source, window=window,
+                           stats=stats, top_ips=top_ips,
+                           recent=recent, entries=entries, feed=feed)
+
+
 @app.route("/feeds")
 def feeds_list():
     with get_db() as conn:

@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% block title %} — {{ source.nazev }}{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px">
+  <div>
+    <div style="margin-bottom:6px">
+      <a href="{{ url_for('sources_list') }}"
+         style="font-size:12px;color:var(--muted);text-decoration:none">← Zdroje</a>
+    </div>
+    <h1 style="display:flex;align-items:center;gap:10px">
+      {{ source.nazev }}
+      {% if source.source_type == 'upstream_http' %}
+        <span class="badge badge-warn">HTTP feed</span>
+      {% elif source.source_type == 'agent_native' %}
+        <span class="badge badge-on">agent native</span>
+      {% else %}
+        <span class="badge badge-off">{{ source.source_type }}</span>
+      {% endif %}
+      {% if not source.enabled %}
+        <span class="badge badge-off">vypnuto</span>
+      {% endif %}
+    </h1>
+  </div>
+  {% if source.source_type == 'upstream_http' %}
+  <form method="POST" action="{{ url_for('source_refresh', source_id=source.id) }}">
+    <button class="btn btn-ghost">↻ Refresh</button>
+  </form>
+  {% endif %}
+</div>
+
+<!-- Stats bar -->
+<div class="stat-grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));margin-bottom:20px">
+  {% if source.source_type == 'agent_native' %}
+    <div class="stat-card">
+      <div class="label">Celkem</div>
+      <div class="value" style="font-size:22px">{{ '{:,}'.format(stats.total) if stats.total else '0' }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Za 24h</div>
+      <div class="value accent" style="font-size:22px">{{ stats.h24 or 0 }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Za 7 dni</div>
+      <div class="value" style="font-size:22px;color:var(--text)">{{ stats.h7d or 0 }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Za 30 dni</div>
+      <div class="value" style="font-size:22px;color:var(--text)">{{ stats.h30d or 0 }}</div>
+    </div>
+  {% elif source.source_type == 'upstream_http' and feed %}
+    <div class="stat-card">
+      <div class="label">Zaznamu</div>
+      <div class="value accent" style="font-size:22px">{{ '{:,}'.format(stats.total) if stats.total else '0' }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Posledni refresh</div>
+      <div class="value" style="font-size:13px;margin-top:8px;color:var(--text)">
+        <span data-utc="{{ stats.last_refresh.isoformat() if stats.last_refresh else '' }}">
+          {{ stats.last_refresh.strftime('%Y-%m-%d %H:%M') if stats.last_refresh else '—' }}
+        </span>
+      </div>
+    </div>
+    {% if feed %}
+    <div class="stat-card" style="grid-column:span 2">
+      <div class="label">URL</div>
+      <div class="mono" style="font-size:11px;margin-top:6px;color:var(--muted);word-break:break-all">{{ feed.url }}</div>
+    </div>
+    {% endif %}
+  {% endif %}
+</div>
+
+{% if source.source_type == 'agent_native' %}
+<!-- Time filter -->
+<div style="display:flex;gap:6px;margin-bottom:20px;align-items:center">
+  <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;margin-right:4px">Okno:</span>
+  {% for w, label in [('1h','1h'),('24h','24h'),('7d','7 dní'),('30d','30 dní')] %}
+    <a href="?w={{ w }}"
+       class="btn btn-sm {{ 'btn-primary' if window == w else 'btn-ghost' }}">{{ label }}</a>
+  {% endfor %}
+</div>
+
+<!-- Two-column: Top IPs + Recent events -->
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+
+  <div class="card" style="margin:0">
+    <div class="card-title">Top 50 IP
+      <span style="font-weight:400;color:var(--muted);font-size:10px;margin-left:6px">
+        za {{ {'1h':'1h','24h':'24h','7d':'7 dní','30d':'30 dní'}[window] }}
+      </span>
+    </div>
+    {% if top_ips %}
+    <table>
+      <thead>
+        <tr><th>#</th><th>IP adresa</th><th>Pocet</th><th>Posledni</th></tr>
+      </thead>
+      <tbody>
+        {% for r in top_ips %}
+        <tr>
+          <td class="mono" style="color:var(--muted);font-size:11px">{{ loop.index }}</td>
+          <td class="mono" style="color:var(--accent)">{{ r.ipadresa }}</td>
+          <td class="mono" style="color:var(--text-hi);font-weight:600">{{ r.pocet }}</td>
+          <td class="mono" style="color:var(--muted);font-size:11px;white-space:nowrap">
+            {{ r.posledni.strftime('%m-%d %H:%M') if r.posledni else '—' }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p style="color:var(--muted);font-size:13px">Zadna data v tomto okne.</p>
+    {% endif %}
+  </div>
+
+  <div class="card" style="margin:0">
+    <div class="card-title">Posledních 50 záznamu</div>
+    {% if recent %}
+    <div style="max-height:520px;overflow-y:auto">
+    <table>
+      <thead>
+        {% if source.parametry.table == 'auth_failures' %}
+        <tr><th>Cas</th><th>IP</th><th>Uzivatel</th><th>Server</th></tr>
+        {% else %}
+        <tr><th>Cas</th><th>IP</th><th>Akce</th><th>Server</th></tr>
+        {% endif %}
+      </thead>
+      <tbody>
+        {% for r in recent %}
+        <tr>
+          <td class="mono" style="font-size:10px;color:var(--muted);white-space:nowrap">
+            {{ r.ts.strftime('%m-%d %H:%M') if r.ts else '—' }}
+          </td>
+          <td class="mono" style="color:var(--accent);font-size:12px">{{ r.ipadresa or '—' }}</td>
+          {% if source.parametry.table == 'auth_failures' %}
+          <td style="font-size:11px;color:var(--muted)">{{ r.uzivatel or '—' }}</td>
+          {% else %}
+          <td style="font-size:11px;color:var(--muted)">{{ r.akce or '—' }}</td>
+          {% endif %}
+          <td style="font-size:11px;color:var(--muted)">{{ r.sourceserver or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <p style="color:var(--muted);font-size:13px">Zadna data.</p>
+    {% endif %}
+  </div>
+
+</div>
+
+{% elif source.source_type == 'upstream_http' %}
+<!-- Upstream: entries table -->
+<div class="card">
+  <div class="card-title">
+    Zaznamy ({{ entries | length }}{% if entries | length == 500 %}, zobrazeno max 500{% endif %})
+    <span style="font-weight:400;font-size:11px;color:var(--muted);margin-left:8px">
+      {{ feed.list_type if feed else '' }}
+    </span>
+  </div>
+  {% if entries %}
+  <div style="margin-bottom:12px">
+    <input type="text" id="entry-filter" placeholder="Filtrovat..."
+           oninput="filterEntries(this.value)"
+           style="width:240px;padding:6px 10px;font-size:12px">
+  </div>
+  <div style="max-height:600px;overflow-y:auto">
+  <table>
+    <thead><tr><th>Zaznam</th></tr></thead>
+    <tbody id="entry-tbody">
+      {% for e in entries %}
+      <tr><td class="mono" style="color:var(--accent);font-size:12px">{{ e.zaznam }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <script>
+    function filterEntries(q) {
+      q = q.toLowerCase();
+      document.querySelectorAll('#entry-tbody tr').forEach(function(tr) {
+        tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
+      });
+    }
+  </script>
+  {% else %}
+  <p style="color:var(--muted);font-size:13px">Zadne zaznamy — spuste Refresh.</p>
+  {% endif %}
+</div>
+{% endif %}
+
+{% endblock %}

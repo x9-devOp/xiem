@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %} — Zdroje dat{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Zdroje dat</h1>
+  <p>Vsechny zdroje IP dat — vlastni i externi feedy</p>
+</div>
+
+{% for category, message in get_flashed_messages(with_categories=true) %}
+  <div class="flash {{ category }}">{{ message }}</div>
+{% endfor %}
+
+<details style="margin-bottom:20px">
+  <summary style="cursor:pointer;padding:10px 16px;background:var(--surface);border:1px solid var(--border);border-radius:6px;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:1px;list-style:none;display:flex;align-items:center;gap:8px">
+    <span style="font-size:9px">▶</span> Pridat HTTP feed
+  </summary>
+  <div style="padding:20px;background:var(--surface);border:1px solid var(--border);border-top:none;border-bottom-left-radius:6px;border-bottom-right-radius:6px">
+    <form method="POST" action="{{ url_for('source_add_feed') }}">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Nazev</label>
+          <input type="text" name="nazev" placeholder="napr. Spamhaus DROP" required>
+        </div>
+        <div class="form-group" style="flex:1">
+          <label>URL</label>
+          <input type="url" name="url" placeholder="https://..." required style="min-width:300px">
+        </div>
+        <div class="form-group">
+          <label>Typ</label>
+          <select name="list_type">
+            <option value="ip">IP / CIDR</option>
+            <option value="fqdn">FQDN</option>
+            <option value="url">URL</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Poznamka</label>
+          <input type="text" name="poznamka" placeholder="volitelne">
+        </div>
+        <button type="submit" class="btn btn-primary">+ Pridat</button>
+      </div>
+    </form>
+  </div>
+</details>
+
+<div class="card">
+  <div class="card-title">Zdroje ({{ sources | length }})</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Typ</th>
+        <th>Nazev</th>
+        <th>Zaznamu celkem</th>
+        <th>Za 24h</th>
+        <th>Posledni aktivita</th>
+        <th>Vaha</th>
+        <th>Status</th>
+        <th>Akce</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in sources %}
+      <tr>
+        <td>
+          {% if s.source_type == 'upstream_http' %}
+            <span class="badge badge-warn">HTTP feed</span>
+          {% elif s.source_type == 'agent_native' %}
+            <span class="badge badge-on">agent</span>
+          {% elif s.source_type == 'agent_script' %}
+            <span class="badge badge-fqdn">skript</span>
+          {% else %}
+            <span class="badge badge-off">{{ s.source_type }}</span>
+          {% endif %}
+        </td>
+        <td>
+          <a href="{{ url_for('source_detail', source_id=s.id) }}"
+             style="color:var(--text-hi);font-weight:500;text-decoration:none">
+            {{ s.nazev }}
+          </a>
+        </td>
+        <td class="mono" style="color:var(--accent)">
+          {{ '{:,}'.format(s.total_count) if s.total_count else '0' }}
+        </td>
+        <td class="mono">
+          {% if s.h24_count is none %}
+            <span style="color:var(--muted)">—</span>
+          {% elif s.h24_count > 0 %}
+            <span style="color:var(--accent);font-weight:600">+{{ s.h24_count }}</span>
+          {% else %}
+            <span style="color:var(--muted)">0</span>
+          {% endif %}
+        </td>
+        <td class="mono" style="font-size:11px;color:var(--muted)">
+          <span data-utc="{{ s.last_activity.isoformat() if s.last_activity else '' }}">
+            {{ s.last_activity.strftime('%Y-%m-%d %H:%M') if s.last_activity else '—' }}
+          </span>
+        </td>
+        <td class="mono" style="color:var(--muted)">{{ s.vaha_default }}</td>
+        <td>
+          {% if s.enabled %}
+            <span class="badge badge-on">aktivni</span>
+          {% else %}
+            <span class="badge badge-off">vypnuto</span>
+          {% endif %}
+        </td>
+        <td>
+          <div style="display:flex;gap:6px">
+            <a href="{{ url_for('source_detail', source_id=s.id) }}"
+               class="btn btn-ghost btn-sm">Detail ↗</a>
+            <form class="inline" method="POST"
+                  action="{{ url_for('source_toggle', source_id=s.id) }}">
+              <button class="btn btn-ghost btn-sm">
+                {{ '⏸' if s.enabled else '▶' }}
+              </button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" style="color:var(--muted);text-align:center;padding:24px">Zadne zdroje.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

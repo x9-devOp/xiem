@@ -375,8 +375,8 @@
       <span class="icon">&#9654;</span> Prikazy
     </a></li>
     <div class="section-label">Zdroje dat</div>
-    <li><a href="{{ url_for('feeds_list') }}" class="{{ 'active' if request.endpoint == 'feeds_list' }}">
-      <span class="icon">↓</span> Feedy
+    <li><a href="{{ url_for('sources_list') }}" class="{{ 'active' if request.endpoint in ['sources_list', 'source_detail'] }}">
+      <span class="icon">◎</span> Zdroje
     </a></li>
     <li><a href="{{ url_for('manual_ips_list') }}" class="{{ 'active' if request.endpoint == 'manual_ips_list' }}">
       <span class="icon">+</span> Manual IPs
