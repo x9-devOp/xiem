@@ -31,7 +31,7 @@
 
 <!-- Stats bar -->
 <div class="stat-grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));margin-bottom:20px">
-  {% if source.source_type == 'agent_native' %}
+  {% if source.source_type in ['agent_native', 'agent_script'] %}
     <div class="stat-card">
       <div class="label">Celkem</div>
       <div class="value" style="font-size:22px">{{ '{:,}'.format(stats.total) if stats.total else '0' }}</div>
@@ -48,6 +48,18 @@
       <div class="label">Za 30 dni</div>
       <div class="value" style="font-size:22px;color:var(--text)">{{ stats.h30d or 0 }}</div>
     </div>
+    {% if source.source_type == 'agent_script' and source.parametry.module %}
+    <div class="stat-card">
+      <div class="label">Modul</div>
+      <div class="mono" style="font-size:13px;margin-top:8px;color:var(--muted)">{{ source.parametry.module }}</div>
+    </div>
+    {% endif %}
+  {% elif source.source_type == 'manual' %}
+    <div class="stat-card">
+      <div class="label">Aktivnich zaznamu</div>
+      <div class="value accent" style="font-size:22px">{{ stats.total or 0 }}</div>
+    </div>
+
   {% elif source.source_type == 'upstream_http' and feed %}
     <div class="stat-card">
       <div class="label">Zaznamu</div>
@@ -70,7 +82,7 @@
   {% endif %}
 </div>
 
-{% if source.source_type == 'agent_native' %}
+{% if source.source_type in ['agent_native', 'agent_script'] %}
 <!-- Time filter -->
 <div style="display:flex;gap:6px;margin-bottom:20px;align-items:center">
   <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;margin-right:4px">Okno:</span>
@@ -147,6 +159,33 @@
     {% endif %}
   </div>
 
+</div>
+
+{% elif source.source_type == 'manual' %}
+<!-- Manual IPs: redirect to dedicated page -->
+<div class="card">
+  <div class="card-title">Manual IPs</div>
+  <p style="font-size:13px;color:var(--muted)">
+    Spravujte zaznamy na strance
+    <a href="{{ url_for('manual_ips_list') }}" style="color:var(--accent)">Manual IPs ↗</a>
+  </p>
+  {% if entries %}
+  <div style="max-height:400px;overflow-y:auto;margin-top:12px">
+  <table>
+    <thead><tr><th>Zaznam</th><th>Typ</th></tr></thead>
+    <tbody>
+      {% for e in entries %}
+      <tr>
+        <td class="mono" style="color:var(--accent);font-size:12px">{{ e.zaznam }}</td>
+        <td><span class="badge {{ 'badge-err' if e.typ == 'block' else 'badge-off' }}">{{ e.typ }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p style="color:var(--muted);font-size:13px;margin-top:8px">Zadne zaznamy.</p>
+  {% endif %}
 </div>
 
 {% elif source.source_type == 'upstream_http' %}

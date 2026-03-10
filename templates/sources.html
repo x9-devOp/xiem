@@ -11,7 +11,7 @@
   <div class="flash {{ category }}">{{ message }}</div>
 {% endfor %}
 
-<details style="margin-bottom:20px">
+<details style="margin-bottom:12px">
   <summary style="cursor:pointer;padding:10px 16px;background:var(--surface);border:1px solid var(--border);border-radius:6px;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:1px;list-style:none;display:flex;align-items:center;gap:8px">
     <span style="font-size:9px">▶</span> Pridat HTTP feed
   </summary>
@@ -44,6 +44,39 @@
   </div>
 </details>
 
+<details style="margin-bottom:20px">
+  <summary style="cursor:pointer;padding:10px 16px;background:var(--surface);border:1px solid var(--border);border-radius:6px;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:1px;list-style:none;display:flex;align-items:center;gap:8px">
+    <span style="font-size:9px">▶</span> Pridat script zdroj (agent_script)
+  </summary>
+  <div style="padding:20px;background:var(--surface);border:1px solid var(--border);border-top:none;border-bottom-left-radius:6px;border-bottom-right-radius:6px">
+    <p style="font-size:12px;color:var(--muted);margin-bottom:12px">
+      Zaregistruje pojmenovany zdroj pro data z agent_events (script modul).
+      Modul musi existovat v agent_module_config a vysilat JSON s IP polem.
+    </p>
+    <form method="POST" action="{{ url_for('source_add_script') }}">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Nazev</label>
+          <input type="text" name="nazev" placeholder="napr. RDP Scanner" required>
+        </div>
+        <div class="form-group">
+          <label>Modul (module v agent_events)</label>
+          <input type="text" name="module" placeholder="napr. rdp_scan" required>
+        </div>
+        <div class="form-group">
+          <label>IP field</label>
+          <input type="text" name="ip_field" placeholder="ipadresa" value="ipadresa">
+        </div>
+        <div class="form-group">
+          <label>Vaha</label>
+          <input type="number" name="vaha" value="1.0" step="0.1" min="0" style="width:80px">
+        </div>
+        <button type="submit" class="btn btn-primary">+ Pridat</button>
+      </div>
+    </form>
+  </div>
+</details>
+
 <div class="card">
   <div class="card-title">Zdroje ({{ sources | length }})</div>
   <table>
@@ -69,6 +102,8 @@
             <span class="badge badge-on">agent</span>
           {% elif s.source_type == 'agent_script' %}
             <span class="badge badge-fqdn">skript</span>
+          {% elif s.source_type == 'manual' %}
+            <span class="badge badge-err">manual</span>
           {% else %}
             <span class="badge badge-off">{{ s.source_type }}</span>
           {% endif %}

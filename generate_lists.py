@@ -117,6 +117,42 @@ def get_param(parametry: dict, key: str, default):
     except Exception:
         return default
 
+
+def _resolve_source(raw: dict) -> dict:
+    """
+    Map output_list_sources row (with optional sources JOIN) to effective
+    {source_type, source_id, parametry} consumed by compute_scores_for_list.
+    ols_params override src_params for scoring keys (vaha, decay_lambda, window_days).
+    """
+    src_type   = raw.get("src_type")
+    src_params = raw.get("src_params") or {}
+    ols_params = raw.get("parametry") or {}
+
+    if src_type:
+        merged = dict(src_params)
+        merged.update(ols_params)
+        if src_type == "upstream_http":
+            return {
+                "source_type": "upstream_feed",
+                "source_id":   src_params.get("upstream_feed_id"),
+                "parametry":   merged,
+            }
+        elif src_type == "agent_native":
+            tbl    = src_params.get("table", "")
+            legacy = "auth_failures" if tbl == "auth_failures" else "eset_network"
+            return {"source_type": legacy, "source_id": None, "parametry": merged}
+        elif src_type == "agent_script":
+            return {"source_type": "agent_events", "source_id": None, "parametry": merged}
+        elif src_type == "manual":
+            return {"source_type": "manual", "source_id": None, "parametry": merged}
+
+    # Legacy fallback: no source_ref_id set
+    return {
+        "source_type": raw["source_type"],
+        "source_id":   raw["source_id"],
+        "parametry":   ols_params,
+    }
+
 # ------------------------------------------------------------
 # Upstream feed refresh
 # ------------------------------------------------------------
@@ -413,11 +449,14 @@ def main():
             with get_db() as conn:
                 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                     cur.execute("""
-                        SELECT source_type, source_id, parametry
-                        FROM output_list_sources
-                        WHERE list_id = %s AND enabled = true
+                        SELECT ols.source_type, ols.source_id, ols.parametry,
+                               s.source_type AS src_type,
+                               s.parametry   AS src_params
+                        FROM output_list_sources ols
+                        LEFT JOIN sources s ON ols.source_ref_id = s.id
+                        WHERE ols.list_id = %s AND ols.enabled = true
                     """, (list_id,))
-                    sources = cur.fetchall()
+                    sources = [_resolve_source(r) for r in cur.fetchall()]
 
             if not sources:
                 log.warning("List %s has no enabled sources, writing empty file", list_name)

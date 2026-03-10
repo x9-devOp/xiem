@@ -354,8 +354,10 @@
 
 <nav>
   <div class="nav-logo">
-    <div class="wordmark">XIEM</div>
-    <div class="sub">X9 Intrusion Monitor</div>
+    <a href="{{ url_for('dashboard') }}" style="text-decoration:none">
+      <div class="wordmark">XIEM</div>
+      <div class="sub">X9 Intrusion Monitor</div>
+    </a>
   </div>
   <ul>
     <li><a href="{{ url_for('dashboard') }}" class="{{ 'active' if request.endpoint == 'dashboard' }}">

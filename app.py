@@ -622,6 +622,18 @@ def sources_list():
             native_stats = {r["tbl"]: r for r in cur.fetchall()}
             cur.execute("SELECT id, pocet_zaznamu, posledni_refresh FROM upstream_feeds")
             feed_stats = {r["id"]: r for r in cur.fetchall()}
+            cur.execute("SELECT COUNT(*) AS total FROM manual_ips WHERE enabled = true")
+            manual_stats = cur.fetchone() or {}
+            # Stats for agent_script sources (by module name)
+            cur.execute("""
+                SELECT module,
+                       COUNT(*) AS total,
+                       COUNT(*) FILTER (WHERE created_at >= now()-'24h'::interval) AS h24,
+                       MAX(created_at) AS latest
+                FROM agent_events
+                GROUP BY module
+            """)
+            script_stats = {r["module"]: r for r in cur.fetchall()}
 
     sources = []
     for s in rows:
@@ -637,6 +649,20 @@ def sources_list():
             s["total_count"]   = st.get("pocet_zaznamu", 0)
             s["h24_count"]     = None
             s["last_activity"] = st.get("posledni_refresh")
+        elif s["source_type"] == "manual":
+            s["total_count"]   = manual_stats.get("total", 0)
+            s["h24_count"]     = None
+            s["last_activity"] = None
+        elif s["source_type"] == "agent_script":
+            module = p.get("module", "")
+            st = script_stats.get(module, {})
+            s["total_count"]   = st.get("total", 0)
+            s["h24_count"]     = st.get("h24", 0)
+            s["last_activity"] = st.get("latest")
+        else:
+            s["total_count"]   = None
+            s["h24_count"]     = None
+            s["last_activity"] = None
         sources.append(s)
 
     return render_template("sources.html", sources=sources)
@@ -671,6 +697,34 @@ def source_add_feed():
         flash(f"Feed '{nazev}' pridan.", "ok")
     except psycopg2.errors.UniqueViolation:
         flash("Feed s touto URL uz existuje.", "error")
+    except Exception as e:
+        flash(f"Chyba: {e}", "error")
+    return redirect(url_for("sources_list"))
+
+
+@app.route("/sources/add-script", methods=["POST"])
+def source_add_script():
+    nazev    = request.form.get("nazev", "").strip()
+    module   = request.form.get("module", "").strip()
+    ip_field = request.form.get("ip_field", "ipadresa").strip() or "ipadresa"
+    vaha     = request.form.get("vaha", "1.0").strip()
+
+    if not nazev or not module:
+        flash("Nazev a modul jsou povinne.", "error")
+        return redirect(url_for("sources_list"))
+    try:
+        vaha_f = float(vaha)
+    except ValueError:
+        vaha_f = 1.0
+
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO sources (nazev, source_type, parametry, vaha_default)
+                    VALUES (%s, 'agent_script', %s, %s)
+                """, (nazev, psycopg2.extras.Json({"module": module, "ip_field": ip_field}), vaha_f))
+        flash(f"Script zdroj '{nazev}' pridan.", "ok")
     except Exception as e:
         flash(f"Chyba: {e}", "error")
     return redirect(url_for("sources_list"))
@@ -801,6 +855,47 @@ def source_detail(source_id):
                         FROM eset_network_blocks ORDER BY cas_udalosti DESC LIMIT 50
                     """)
                     recent = cur.fetchall()
+
+            elif source["source_type"] == "agent_script":
+                module   = p.get("module", "")
+                ip_field = p.get("ip_field") or "ipadresa"
+                if module:
+                    cur.execute("""
+                        SELECT COUNT(*) total,
+                               COUNT(*) FILTER (WHERE created_at >= now()-'24h'::interval)    h24,
+                               COUNT(*) FILTER (WHERE created_at >= now()-'7 days'::interval) h7d,
+                               COUNT(*) FILTER (WHERE created_at >= now()-'30 days'::interval) h30d
+                        FROM agent_events WHERE module = %s AND payload ? %s
+                    """, (module, ip_field))
+                    stats = cur.fetchone()
+                    cur.execute("""
+                        SELECT payload->>%s AS ipadresa,
+                               COUNT(*) pocet,
+                               MAX(created_at) posledni
+                        FROM agent_events
+                        WHERE module = %s
+                          AND created_at >= now() - %s::interval
+                          AND payload ? %s
+                        GROUP BY 1 ORDER BY 2 DESC LIMIT 50
+                    """, (ip_field, module, interval, ip_field))
+                    top_ips = cur.fetchall()
+                    cur.execute("""
+                        SELECT ae.created_at AS ts,
+                               ae.payload->>%s AS ipadresa,
+                               a.hostname AS sourceserver,
+                               ae.payload::text AS akce
+                        FROM agent_events ae
+                        LEFT JOIN agents a ON ae.agent_id = a.id
+                        WHERE ae.module = %s
+                        ORDER BY ae.created_at DESC LIMIT 50
+                    """, (ip_field, module))
+                    recent = cur.fetchall()
+
+            elif source["source_type"] == "manual":
+                cur.execute("SELECT zaznam, typ FROM manual_ips WHERE enabled = true ORDER BY typ, zaznam LIMIT 500")
+                entries = cur.fetchall()
+                cur.execute("SELECT COUNT(*) AS total FROM manual_ips WHERE enabled = true")
+                stats = {"total": (cur.fetchone() or {}).get("total", 0)}
 
             elif source["source_type"] == "upstream_http":
                 fid = p.get("upstream_feed_id")
@@ -1339,48 +1434,104 @@ def list_detail(list_id):
             """, (list_id,))
             sources = cur.fetchall()
 
-            cur.execute("SELECT id, nazev FROM upstream_feeds WHERE enabled = true ORDER BY nazev")
-            feeds = cur.fetchall()
+            cur.execute("""
+                SELECT id, nazev, source_type, parametry, vaha_default
+                FROM sources WHERE enabled = true
+                ORDER BY source_type, nazev
+            """)
+            all_sources = cur.fetchall()
 
-    return render_template("list_detail.html", lst=lst, sources=sources, feeds=feeds)
+    return render_template("list_detail.html", lst=lst, sources=sources, all_sources=all_sources)
 
 
 @app.route("/lists/<int:list_id>/sources/add", methods=["POST"])
 def list_source_add(list_id):
-    import json as _json
-    source_type = request.form.get("source_type", "")
-    source_id   = request.form.get("source_id") or None
+    source_ref_id = request.form.get("source_ref_id") or None
 
-    if source_type not in ("auth_failures", "eset_network", "upstream_feed", "manual", "agent_events"):
-        flash("Neplatny typ zdroje.", "error")
+    if not source_ref_id:
+        flash("Vyberte zdroj.", "error")
         return redirect(url_for("list_detail", list_id=list_id))
 
-    if source_type == "upstream_feed" and not source_id:
-        flash("Vyberte feed.", "error")
+    try:
+        source_ref_id = int(source_ref_id)
+    except (ValueError, TypeError):
+        flash("Neplatny zdroj.", "error")
         return redirect(url_for("list_detail", list_id=list_id))
 
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT * FROM sources WHERE id = %s", (source_ref_id,))
+            src = cur.fetchone()
+
+    if not src:
+        flash("Zdroj nenalezen.", "error")
+        return redirect(url_for("list_detail", list_id=list_id))
+
+    # Determine legacy source_type + source_id for backward compat with generate_lists.py
+    sp = src["parametry"] or {}
+    stype = src["source_type"]
     parametry = None
-    if source_type == "agent_events":
-        ae_module   = request.form.get("ae_module", "").strip()
-        ae_ip_field = request.form.get("ae_ip_field", "ipadresa").strip()
-        if not ae_module:
-            flash("Zadejte nazev modulu pro agent_events.", "error")
-            return redirect(url_for("list_detail", list_id=list_id))
-        parametry = _json.dumps({"module": ae_module, "ip_field": ae_ip_field or "ipadresa"})
+
+    if stype == "agent_native":
+        tbl = sp.get("table", "")
+        legacy_type = "auth_failures" if tbl == "auth_failures" else "eset_network"
+        legacy_sid  = None
+    elif stype == "upstream_http":
+        legacy_type = "upstream_feed"
+        legacy_sid  = sp.get("upstream_feed_id")
+    elif stype == "agent_script":
+        legacy_type = "agent_events"
+        legacy_sid  = None
+        parametry   = _json.dumps({
+            "module":   sp.get("module", ""),
+            "ip_field": sp.get("ip_field", "ipadresa"),
+        })
+    elif stype == "manual":
+        legacy_type = "manual"
+        legacy_sid  = None
+    else:
+        legacy_type = stype
+        legacy_sid  = None
 
     try:
         with get_db() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO output_list_sources (list_id, source_type, source_id, parametry)
-                    VALUES (%s, %s, %s, %s)
-                """, (list_id, source_type,
-                      int(source_id) if source_id else None,
-                      parametry))
+                    INSERT INTO output_list_sources
+                        (list_id, source_type, source_id, parametry, source_ref_id)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (list_id, legacy_type,
+                      int(legacy_sid) if legacy_sid else None,
+                      parametry, source_ref_id))
         flash("Zdroj pridan.", "ok")
     except Exception as e:
         flash(f"Chyba: {e}", "error")
 
+    return redirect(url_for("list_detail", list_id=list_id))
+
+
+@app.route("/lists/<int:list_id>/sources/<int:source_id>/params", methods=["POST"])
+def list_source_params(list_id, source_id):
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT parametry FROM output_list_sources WHERE id = %s AND list_id = %s",
+                (source_id, list_id))
+            row = cur.fetchone()
+            if not row:
+                abort(404)
+            params = dict(row["parametry"] or {})
+            for key in ("vaha", "decay_lambda", "window_days"):
+                val = (request.form.get(key) or "").strip()
+                if val:
+                    try:
+                        params[key] = float(val)
+                    except ValueError:
+                        pass
+            cur.execute(
+                "UPDATE output_list_sources SET parametry = %s WHERE id = %s",
+                (psycopg2.extras.Json(params), source_id))
+    flash("Parametry ulozeny.", "ok")
     return redirect(url_for("list_detail", list_id=list_id))
 
 

@@ -47,36 +47,23 @@
   <div class="card-title">Pridat zdroj</div>
   <form method="POST" action="{{ url_for('list_source_add', list_id=lst.id) }}">
     <div class="form-row">
-      <div class="form-group">
-        <label>Typ zdroje</label>
-        <select name="source_type" id="src-type" onchange="updateSourceId()">
-          <option value="auth_failures">auth_failures (Event 4625)</option>
-          <option value="eset_network">eset_network (ESET blocks)</option>
-          <option value="upstream_feed">upstream_feed</option>
-          <option value="manual">manual IPs</option>
-          <option value="agent_events">agent_events (script modul)</option>
-        </select>
-      </div>
-      <div class="form-group" id="src-feed-group" style="display:none">
-        <label>Feed</label>
-        <select name="source_id">
-          <option value="">— vyberte —</option>
-          {% for f in feeds %}
-          <option value="{{ f.id }}">{{ f.nazev }}</option>
+      <div class="form-group" style="flex:1">
+        <label>Zdroj dat</label>
+        <select name="source_ref_id" style="min-width:280px">
+          <option value="">— vyberte zdroj —</option>
+          {% set ns = namespace(last_type='') %}
+          {% for s in all_sources %}
+            {% if s.source_type != ns.last_type %}
+              {% if ns.last_type %}</optgroup>{% endif %}
+              <optgroup label="{{ s.source_type }}">
+              {% set ns.last_type = s.source_type %}
+            {% endif %}
+            <option value="{{ s.id }}">{{ s.nazev }}</option>
           {% endfor %}
+          {% if all_sources %}</optgroup>{% endif %}
         </select>
       </div>
-      <div class="form-group" id="src-ae-group" style="display:none">
-        <label>Modul (nazev z agent_module_config)</label>
-        <input type="text" name="ae_module" placeholder="napr. local_users"
-               style="padding:6px 10px;font-size:13px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text-hi)">
-      </div>
-      <div class="form-group" id="src-ae-ip-group" style="display:none">
-        <label>IP field (nazev JSON pole s IP adresou)</label>
-        <input type="text" name="ae_ip_field" placeholder="ipadresa"
-               style="padding:6px 10px;font-size:13px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text-hi)">
-      </div>
-      <button type="submit" class="btn btn-primary">+ Pridat zdroj</button>
+      <button type="submit" class="btn btn-primary">+ Pridat</button>
     </div>
   </form>
 </div>
@@ -88,66 +75,49 @@
       <tr>
         <th>Typ</th>
         <th>Zdroj</th>
-        <th>Zaznamu</th>
         <th>Vaha</th>
-        <th>Doporuceno pro</th>
+        <th>Decay λ</th>
+        <th>Window (d)</th>
         <th>Status</th>
         <th>Akce</th>
       </tr>
     </thead>
     <tbody>
       {% for s in sources %}
+      {% set p = s.parametry or {} %}
       <tr>
         <td><span class="badge badge-off">{{ s.source_type }}</span></td>
-        <td style="color:var(--muted);font-size:12px">
-          {% if s.source_type == 'upstream_feed' and s.feed_nazev %}
-            {{ s.feed_nazev }}
+        <td style="font-size:12px">
+          {% if s.source_ref_id %}
+            <a href="{{ url_for('source_detail', source_id=s.source_ref_id) }}"
+               style="color:var(--accent);text-decoration:none">
+              {% for src in all_sources if src.id == s.source_ref_id %}{{ src.nazev }}{% endfor %} ↗
+            </a>
           {% elif s.source_type == 'auth_failures' %}
             <a href="{{ url_for('list_source_auth_failures', list_id=lst.id) }}"
-               style="color:var(--accent);text-decoration:none">
-              Auth failures (Event 4625) ↗
-            </a>
+               style="color:var(--accent);text-decoration:none">Auth failures (Event 4625) ↗</a>
           {% elif s.source_type == 'eset_network' %}
             <a href="{{ url_for('list_source_eset_network', list_id=lst.id) }}"
-               style="color:var(--accent);text-decoration:none">
-              ESET network blocks ↗
-            </a>
+               style="color:var(--accent);text-decoration:none">ESET network blocks ↗</a>
+          {% elif s.source_type == 'upstream_feed' and s.feed_nazev %}
+            {{ s.feed_nazev }}
           {% elif s.source_type == 'manual' %}
-            Vsechny manual IPs (typ=block)
+            <a href="{{ url_for('manual_ips_list') }}"
+               style="color:var(--muted);text-decoration:none">Manual IPs ↗</a>
           {% elif s.source_type == 'agent_events' %}
-            agent_events
-            {% if s.parametry %}
-              · <span class="mono" style="font-size:11px">{{ s.parametry.module or '?' }}</span>
-              · ip_field: <span class="mono" style="font-size:11px">{{ s.parametry.ip_field or 'ipadresa' }}</span>
-            {% endif %}
+            agent_events · <span class="mono" style="font-size:11px">{{ p.module or '?' }}</span>
           {% else %}
-            —
+            <span style="color:var(--muted)">—</span>
           {% endif %}
         </td>
-        <td class="mono" style="color:var(--accent)">
-          {% if s.source_type == 'upstream_feed' %}
-            {{ s.feed_pocet or 0 }}
-          {% else %}
-            —
-          {% endif %}
+        <td class="mono" style="font-size:12px;color:{{ 'var(--accent)' if p.vaha else 'var(--muted)' }}">
+          {{ p.vaha if p.vaha is defined and p.vaha != none else '—' }}
         </td>
-        <td class="mono">
-          {% if s.source_type == 'upstream_feed' %}
-            {{ s.feed_vaha or '3.0' }}
-          {% else %}
-            —
-          {% endif %}
+        <td class="mono" style="font-size:11px;color:var(--muted)">
+          {{ p.decay_lambda if p.decay_lambda is defined and p.decay_lambda != none else '—' }}
         </td>
-        <td>
-          {% if s.source_type == 'upstream_feed' %}
-            {% if s.feed_doporuceno == 'both' %}
-              <span class="badge badge-warn">both</span>
-            {% else %}
-              <span class="badge badge-off">inbound</span>
-            {% endif %}
-          {% else %}
-            —
-          {% endif %}
+        <td class="mono" style="font-size:11px;color:var(--muted)">
+          {{ p.window_days if p.window_days is defined and p.window_days != none else '—' }}
         </td>
         <td>
           {% if s.enabled %}
@@ -157,10 +127,11 @@
           {% endif %}
         </td>
         <td>
-          <div style="display:flex;gap:6px">
+          <div style="display:flex;gap:4px;flex-wrap:wrap">
+            <button class="btn btn-ghost btn-sm" onclick="toggleParams({{ s.id }})">✎</button>
             <form class="inline" method="POST"
                   action="{{ url_for('list_source_toggle', list_id=lst.id, source_id=s.id) }}">
-              <button class="btn btn-ghost btn-sm">{{ '⏸ Vypnout' if s.enabled else '▶ Zapnout' }}</button>
+              <button class="btn btn-ghost btn-sm">{{ '⏸' if s.enabled else '▶' }}</button>
             </form>
             <form class="inline" method="POST"
                   action="{{ url_for('list_source_delete', list_id=lst.id, source_id=s.id) }}"
@@ -168,6 +139,33 @@
               <button class="btn btn-danger btn-sm">✕</button>
             </form>
           </div>
+        </td>
+      </tr>
+      <tr id="params-row-{{ s.id }}" style="display:none;background:rgba(255,255,255,0.015)">
+        <td colspan="7" style="padding:10px 12px">
+          <form method="POST"
+                action="{{ url_for('list_source_params', list_id=lst.id, source_id=s.id) }}"
+                style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+            <div class="form-group">
+              <label>Vaha</label>
+              <input type="number" name="vaha" step="0.1" min="0"
+                     value="{{ p.vaha if p.vaha is defined and p.vaha != none else '' }}"
+                     placeholder="default" style="width:90px">
+            </div>
+            <div class="form-group">
+              <label>Decay &#955;</label>
+              <input type="number" name="decay_lambda" step="0.001" min="0"
+                     value="{{ p.decay_lambda if p.decay_lambda is defined and p.decay_lambda != none else '' }}"
+                     placeholder="0.05" style="width:90px">
+            </div>
+            <div class="form-group">
+              <label>Window (dni)</label>
+              <input type="number" name="window_days" step="1" min="1"
+                     value="{{ p.window_days if p.window_days is defined and p.window_days != none else '' }}"
+                     placeholder="120" style="width:90px">
+            </div>
+            <button type="submit" class="btn btn-primary btn-sm">Ulozit</button>
+          </form>
         </td>
       </tr>
       {% else %}
@@ -221,14 +219,9 @@ function loadExplain() {
     });
 }
 
-function updateSourceId() {
-  var t = document.getElementById('src-type').value;
-  document.getElementById('src-feed-group').style.display =
-    (t === 'upstream_feed') ? 'flex' : 'none';
-  var ae = (t === 'agent_events');
-  document.getElementById('src-ae-group').style.display    = ae ? 'flex' : 'none';
-  document.getElementById('src-ae-ip-group').style.display = ae ? 'flex' : 'none';
+function toggleParams(id) {
+  var row = document.getElementById('params-row-' + id);
+  row.style.display = row.style.display === 'none' ? '' : 'none';
 }
-updateSourceId();
 </script>
 {% endblock %}
