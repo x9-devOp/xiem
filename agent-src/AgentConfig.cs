@@ -1,5 +1,10 @@
 namespace XiemAgent;
 
+public static class AgentVersion
+{
+    public const string Current = "2.0.0";
+}
+
 public class AgentConfig
 {
     public int IntervalSec { get; set; } = 3600;

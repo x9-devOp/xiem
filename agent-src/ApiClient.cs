@@ -48,7 +48,7 @@ public class ApiClient
             Hostname      = Environment.MachineName,
             Fqdn          = ResolveFqdn(),
             Group         = _config["Xiem:Group"] ?? "",
-            AgentVersion  = "2.0.0"
+            AgentVersion  = AgentVersion.Current
         };
         try
         {
@@ -116,7 +116,8 @@ public class ApiClient
         SetToken();
         try
         {
-            var resp = await _http.PostAsync("/api/agent/heartbeat", null, ct);
+            var body = new { version = AgentVersion.Current, fqdn = ResolveFqdn() };
+            var resp = await _http.PostAsJsonAsync("/api/agent/heartbeat", body, JsonOpts, ct);
             if (resp.IsSuccessStatusCode) LastContact = DateTime.UtcNow;
         }
         catch (Exception ex) { _log.LogWarning(ex, "Heartbeat failed"); }

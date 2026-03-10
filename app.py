@@ -241,6 +241,9 @@ def agent_ingest(agent):
 def _ingest_eset(cur, records, sourceserver):
     inserted = skipped = 0
     for r in records:
+        if not _is_public_ip(r.get("ipadresa") or ""):
+            skipped += 1
+            continue
         try:
             cur.execute("""
                 INSERT INTO eset_network_blocks
@@ -270,9 +273,26 @@ def _ingest_agent_events(cur, agent_id, module, records):
     return inserted, skipped
 
 
+def _is_public_ip(ip: str) -> bool:
+    """Return True only for valid, globally routable IPv4/IPv6 addresses."""
+    if not ip or ip in ("-", "::1", "0.0.0.0"):
+        return False
+    try:
+        addr = ipaddress.ip_address(ip)
+        return addr.is_global and not addr.is_private and not addr.is_loopback \
+               and not addr.is_link_local and not addr.is_multicast \
+               and not addr.is_reserved and not addr.is_unspecified
+    except ValueError:
+        return False
+
+
 def _ingest_auth(cur, records, sourceserver):
     inserted = skipped = 0
     for r in records:
+        ip = r.get("ipadresa") or ""
+        if not _is_public_ip(ip):
+            skipped += 1
+            continue
         try:
             cur.execute("""
                 INSERT INTO auth_failures
@@ -295,10 +315,18 @@ def _ingest_auth(cur, records, sourceserver):
 @app.route("/api/agent/heartbeat", methods=["POST"])
 @require_agent
 def agent_heartbeat(agent):
+    data    = request.get_json(silent=True) or {}
+    version = data.get("version") or None
+    fqdn    = data.get("fqdn")    or None
     with get_db() as conn:
         with conn.cursor() as cur:
-            cur.execute("UPDATE agents SET posledni_kontakt = now() WHERE id = %s",
-                        (agent["id"],))
+            cur.execute("""
+                UPDATE agents
+                SET posledni_kontakt = now(),
+                    verze_agenta = COALESCE(%s, verze_agenta),
+                    fqdn         = COALESCE(%s, fqdn)
+                WHERE id = %s
+            """, (version, fqdn, agent["id"]))
     return jsonify({"ok": True}), 200
 
 

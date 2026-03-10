@@ -5,3 +5,7 @@ __pycache__/
 *.bak
 agent/
 *.log
+.DS_Store
+agent-src/bin/
+agent-src/obj/
+agent-src/publish/

@@ -15,7 +15,7 @@ Agent zaroven slouzi jako obecny endpoint-management nastroj (ad-hoc prikazy, pa
 - Repo: https://github.com/x9-devOp/xiem
 - Vzdy: git add -> git commit -> git push
 - NIKDY git pull pro deploy - zdroj pravdy je server, ne repo
-- Po zmenach na serveru: commit + push aby repo bylo aktualni
+- Deploy: scp/ssh na spravce@xiem.x9.cz, pak sudo cp + sudo systemctl restart xiem-api
 - Branch: main
 
 ## Dulezite cesty
@@ -25,12 +25,28 @@ Agent zaroven slouzi jako obecny endpoint-management nastroj (ad-hoc prikazy, pa
 /var/www/flask_xiem/venv/           # Python venv
 /usr/local/bin/generate_lists.py    # Blocklist generator (systemd timer, bezi kazdou minutu)
 /var/www/html/IP_LISTS/             # Vystupni soubory pro pfBlocker
-/etc/xiem/env                       # XIEM_DB_DSN pro generate_lists.py
+/etc/xiem/env                       # XIEM_DB_DSN + XIEM_SIGNING_KEY pro Flask/generate_lists.py
+/etc/xiem/signing_key.pem           # RSA-2048 soukromy klic (root:www-data 640)
+/etc/xiem/signing_pubkey.pem        # RSA verejny klic (distribuovan agentum pres /api/agent/pubkey)
 /etc/systemd/system/xiem-api.service
 /etc/systemd/system/generate-lists.service
 /etc/systemd/system/generate-lists.timer
 /var/log/xiem/api-access.log
 /var/log/xiem/api-error.log
+/var/www/flask_xiem/agent/xiem-agent.exe  # Distribucni binary pro Windows agenty
+```
+
+## Deploy workflow
+```bash
+# Mac -> server (app.py):
+scp app.py spravce@xiem.x9.cz:/tmp/app.py
+ssh spravce@xiem.x9.cz 'sudo cp /tmp/app.py /var/www/flask_xiem/app.py && sudo systemctl restart xiem-api'
+
+# Mac -> server (agent binary):
+./build_agent.sh   # dotnet publish win-x64 + scp na server
+
+# Server-side one-time setup:
+ssh spravce@xiem.x9.cz 'bash -s' < deploy_server.sh
 ```
 
 ## DB schema (klic)
@@ -61,11 +77,27 @@ Worker
 │   ├── NativeModule             C# implementace (auth_failures, eset_network)
 │   └── ScriptModule             PS skript -> JSON stdout -> field_mapping -> ingest
 ├── CommandPoller                kazych 30s: GET /api/agent/commands
-│   └── CommandExecutor          PS/CMD + overeni podpisu + POST vysledek
+│   ├── pubkey retry             pokud klic neni nacten, zkusi stazeni pred kazdym pollem
+│   └── CommandExecutor          PS/CMD + overeni RSA podpisu + POST vysledek
 ├── PanicWatchdog                monitoruje connectivity k serveru
 │   └── po vyprseni timeoutu (z panic commandu) vykona panic akci
-└── Heartbeat                    kazych 5 min
+└── Heartbeat                    kazych 5 min (posila verzi + FQDN, server updatuje DB)
 ```
+
+## Agent verze a build
+- Verze konstanta: `AgentVersion.Current` v `agent-src/AgentConfig.cs` (aktualne "2.0.0")
+- Build: `./build_agent.sh` (dotnet publish win-x64 self-contained + scp na server)
+- Install: `.\xiem_install.ps1 -InstallSecret 'SECRET' -Group 'rds'` (jako Administrator)
+- Po buildu je binary na serveru v /var/www/flask_xiem/agent/xiem-agent.exe
+- Agenti si stahnou novou verzi pres `update` command z GUI Prikazy
+
+## RSA podepisovani prikazu
+- Vsechny prikazy jsou podepsany serverem (RSA-PSS-SHA256, salt=32)
+- Klic: /etc/xiem/signing_key.pem (root:www-data 640) - Flask potrebuje read prava
+- Canonical message: "{id}:{type}:{compact_sorted_json_payload}"
+- Agent stahuje pubkey pri startu z /api/agent/pubkey, pinuje na disk
+- Pokud pubkey neni k dispozici, CommandPoller ho retryuje pred kazdym pollem
+- POZOR: po prvnim spusteni agenta kdyz server nema klic (404) -> restart Windows service
 
 ## Module typy (agent_module_config.module_type)
 - `native`     - vestaven C# modul, parametry z JSONB
@@ -107,6 +139,12 @@ ip_field: nazev pole v JSON outputu, ktere obsahuje IP adresu (pro generate_list
   pouze ze tech IP (CIDR). Bez klienta nebo bez IP zaznamu = zadne omezeni.
 - Pri mismatch: 403 + zapis do logu.
 
+## IP filtrovani pri ingestu
+- _is_public_ip() v app.py: odmitne privatni (RFC1918), loopback, link-local, multicast,
+  neplatne stringy, prazdne hodnoty, "-"
+- Aplikuje se na _ingest_auth() a _ingest_eset() pred kazdym INSERT
+- auth_failures: historicka privatni IP a "IP not found" stringy byly jednourazove smazany
+
 ## Pravidla pro tento projekt
 - Komentare v kodu: anglicky, bez diakritiky
 - Pouze ASCII v zdrojovem kodu
@@ -116,6 +154,7 @@ ip_field: nazev pole v JSON outputu, ktere obsahuje IP adresu (pro generate_list
 - get_db() je @contextmanager - nepouzivat jako obycejnou funkci
 - Zmeny DB se vzdy promitaji do GUI (aby byly sledovatelne a kontrolovatelne)
 - Zadne hardcoded hodnoty v agentovi - vse pres parametry pri instalaci nebo ze serveru
+- GRANT pro xiem_writer na nových tabulkach: spustit jako postgres superuser
 
 ## Scoring model (generate_lists.py)
 - Exponencialni decay: `score = weight * e^(-0.05 * age_days)`
@@ -125,25 +164,30 @@ ip_field: nazev pole v JSON outputu, ktere obsahuje IP adresu (pro generate_list
 - Generovani: kazdu minutu, ale list se generuje jen pokud now()-last_generated > interval_min
 - Script moduly: IP se extrahuje podle ip_field z agent_module_config.parametry -> agent_events
 
-## GUI navigace (cilovy stav)
+## GUI navigace (aktualni stav)
 ```
 Dashboard          (prehled, stav agentu, aktivita)
+Infrastruktura:
 ├── Klienti        (seznam, detail: agenti klienta, IP restriction)
-├── Agenti         (seznam, prirazeni ke klientovi, modul config, prikazy, eventy)
+├── Agenti         (seznam, prirazeni ke klientovi, detail)
 ├── Skupiny        (modul config: typ, interval, skript, params)
-├── Prikazy        (novy prikaz, audit log, vysledky per agent)
-├── Zdroje dat     (upstream feeds, manualni IP)
-├── Vystupni listy (definice, zdroje, interval_min)
-└── Analyza        (roadmap: lookup, top-offenders)
+└── Prikazy        (novy prikaz: PS/CMD/update/panic, audit log, vysledky)
+Blocklists:
+├── Upstream Feeds
+├── Manual IPs
+└── Listy          (definice, zdroje, interval_min, detail/zdroj auth_failures/eset)
+Admin:
+└── Agent binary   (nahrat novou verzi, postup aktualizace)
+Analyza:           (stub - roadmap)
 ```
 
-## Implementacni fazovy plan
-- **Faze 1:** DB migrace + agent bez hardcoded hodnot + GUI pro nove sloupce
-- **Faze 2:** ScriptModule v agentovi + genericky ingest + generate_lists rozsireni
-- **Faze 3:** Command poller v agentovi + Flask endpointy + GUI prikazy
-- **Faze 4:** Kryptograficke podepisovani + PanicWatchdog
-- **Faze 5:** GUI overhaul (klienti, agenti, skupiny dle nove navigace)
-- **Faze 6:** Auto-update agenta (per-agent i per-klient targeting)
+## Implementacni fazovy plan - DOKONCENO
+- **Faze 1:** DB migrace + agent bez hardcoded hodnot + GUI pro nove sloupce  [DONE]
+- **Faze 2:** ScriptModule v agentovi + genericky ingest + generate_lists rozsireni [DONE]
+- **Faze 3:** Command poller v agentovi + Flask endpointy + GUI prikazy [DONE]
+- **Faze 4:** RSA podepisovani vsech prikazu + PanicWatchdog [DONE]
+- **Faze 5:** GUI overhaul (klienti, agenti, skupiny dle nove navigace) [DONE]
+- **Faze 6:** Auto-update agenta (update command + binary upload GUI) [DONE]
 
 ## Systemd (bezne prikazy)
 ```bash
@@ -162,6 +206,7 @@ psql "$(sudo grep XIEM_DB_DSN /etc/xiem/env | cut -d= -f2-)" -c 'SELECT 1;'
 ## Roadmap - co je dal
 - Analyze sekce: /analyze/lookup (proc je IP v blocklistu?) + /analyze/top-offenders
 - Per-source scoring parametry editovatelne pres GUI (output_list_sources.parametry JSONB)
+- GUI pro prikazy zatim neni plne nasazeno - pouzit curl na server nebo psql pro odeslani
 
 ## Bezpecnost DB (aktualni stav)
 - pg_hba.conf: pouze localhost (127.0.0.1/32 scram-sha-256), zadny externi pristup

@@ -36,6 +36,13 @@ public class CommandPoller
         {
             try
             {
+                // If pubkey is missing (e.g. server was unreachable at startup), retry download.
+                if (!_verifier.IsLoaded)
+                {
+                    var pem = await _api.GetPubKeyAsync(ct);
+                    if (pem != null) _verifier.LoadFromPem(pem);
+                }
+
                 var commands = await _api.GetCommandsAsync(ct);
                 foreach (var cmd in commands)
                 {
@@ -194,19 +201,22 @@ public class CommandPoller
 
         // Updater runs detached: waits 3s (so result gets posted), stops service,
         // replaces binary, starts service.
-        var script = $"""
-            Start-Sleep -Seconds 3
-            try {{
-                Stop-Service -Name 'XiemAgent' -Force -ErrorAction Stop
-                Start-Sleep -Seconds 2
-                Copy-Item -Path '{tempExe}' -Destination '{currentExe}' -Force
-                Remove-Item -Path '{tempExe}' -ErrorAction SilentlyContinue
-                Start-Service -Name 'XiemAgent'
-            }} catch {{
-                $_ | Out-File -FilePath '{errorLog}' -Force
-            }}
-            Remove-Item -Path '{scriptPath}' -ErrorAction SilentlyContinue
-            """;
+        // Uses @-string + Replace to avoid conflicts between PS $_ / {{ and C# interpolation.
+        var script = @"Start-Sleep -Seconds 3
+try {
+    Stop-Service -Name 'XiemAgent' -Force -ErrorAction Stop
+    Start-Sleep -Seconds 2
+    Copy-Item -Path 'TEMP_EXE' -Destination 'CURRENT_EXE' -Force
+    Remove-Item -Path 'TEMP_EXE' -ErrorAction SilentlyContinue
+    Start-Service -Name 'XiemAgent'
+} catch {
+    $_ | Out-File -FilePath 'ERROR_LOG' -Force
+}
+Remove-Item -Path 'SCRIPT_PATH' -ErrorAction SilentlyContinue"
+            .Replace("TEMP_EXE",    tempExe)
+            .Replace("CURRENT_EXE", currentExe)
+            .Replace("ERROR_LOG",   errorLog)
+            .Replace("SCRIPT_PATH", scriptPath);
 
         try { await File.WriteAllTextAsync(scriptPath, script, ct); }
         catch (Exception ex)

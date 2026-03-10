@@ -74,7 +74,7 @@ $regBody = @{
     install_secret = $InstallSecret
     hostname       = $env:COMPUTERNAME
     group          = $Group
-    agent_version  = "1.1.0"
+    agent_version  = "2.0.0"
 } | ConvertTo-Json
 
 try {
