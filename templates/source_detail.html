@@ -29,6 +29,54 @@
   {% endif %}
 </div>
 
+<!-- Edit form -->
+<details style="margin-bottom:16px">
+  <summary style="cursor:pointer;padding:10px 16px;background:var(--surface);border:1px solid var(--border);border-radius:6px;font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:1px;list-style:none;display:flex;align-items:center;gap:8px">
+    <span style="font-size:9px">▶</span> Upravit zdroj
+  </summary>
+  <div style="padding:20px;background:var(--surface);border:1px solid var(--border);border-top:none;border-bottom-left-radius:6px;border-bottom-right-radius:6px">
+    <form method="POST" action="{{ url_for('source_edit', source_id=source.id) }}">
+      <div class="form-row" style="flex-wrap:wrap">
+        <div class="form-group">
+          <label>Nazev</label>
+          <input type="text" name="nazev" value="{{ source.nazev }}" required style="min-width:220px">
+        </div>
+        <div class="form-group">
+          <label>Vaha (default)</label>
+          <input type="number" name="vaha_default" value="{{ source.vaha_default }}"
+                 step="0.1" min="0" style="width:90px">
+        </div>
+
+        {% if source.source_type == 'upstream_http' and feed %}
+        <div class="form-group" style="flex:1;min-width:280px">
+          <label>URL</label>
+          <input type="url" name="url" value="{{ feed.url }}" required style="min-width:300px">
+        </div>
+        <div class="form-group">
+          <label>Poznamka</label>
+          <input type="text" name="poznamka" value="{{ feed.poznamka or '' }}">
+        </div>
+
+        {% elif source.source_type == 'agent_script' %}
+        <div class="form-group">
+          <label>Modul (agent_events.module)</label>
+          <input type="text" name="module"
+                 value="{{ source.parametry.module if source.parametry else '' }}" required>
+        </div>
+        <div class="form-group">
+          <label>IP field</label>
+          <input type="text" name="ip_field"
+                 value="{{ source.parametry.ip_field if source.parametry else 'ipadresa' }}"
+                 style="width:120px">
+        </div>
+        {% endif %}
+
+        <button type="submit" class="btn btn-primary" style="align-self:flex-end">Ulozit</button>
+      </div>
+    </form>
+  </div>
+</details>
+
 <!-- Stats bar -->
 <div class="stat-grid" style="grid-template-columns:repeat(auto-fill,minmax(130px,1fr));margin-bottom:20px">
   {% if source.source_type in ['agent_native', 'agent_script'] %}

@@ -826,6 +826,56 @@ def source_toggle(source_id):
     return redirect(url_for("sources_list"))
 
 
+@app.route("/sources/<int:source_id>/edit", methods=["POST"])
+def source_edit(source_id):
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT * FROM sources WHERE id = %s", (source_id,))
+            src = cur.fetchone()
+            if not src:
+                flash("Zdroj nenalezen.", "error")
+                return redirect(url_for("sources_list"))
+
+            nazev = request.form.get("nazev", "").strip()
+            if not nazev:
+                flash("Nazev nesmi byt prazdny.", "error")
+                return redirect(url_for("source_detail", source_id=source_id))
+
+            try:
+                vaha = float(request.form.get("vaha_default", src["vaha_default"]))
+            except (ValueError, TypeError):
+                vaha = src["vaha_default"]
+
+            cur.execute(
+                "UPDATE sources SET nazev = %s, vaha_default = %s WHERE id = %s",
+                (nazev, vaha, source_id))
+
+            stype = src["source_type"]
+            p     = dict(src["parametry"] or {})
+
+            if stype == "upstream_http":
+                fid = p.get("upstream_feed_id")
+                new_url      = request.form.get("url", "").strip()
+                new_poznamka = request.form.get("poznamka", "").strip()
+                if fid and new_url:
+                    cur.execute("""
+                        UPDATE upstream_feeds
+                        SET url = %s, poznamka = %s, vaha = %s WHERE id = %s
+                    """, (new_url, new_poznamka or None, vaha, fid))
+
+            elif stype == "agent_script":
+                new_module   = request.form.get("module", "").strip()
+                new_ip_field = request.form.get("ip_field", "ipadresa").strip() or "ipadresa"
+                if new_module:
+                    p["module"]   = new_module
+                    p["ip_field"] = new_ip_field
+                    cur.execute("UPDATE sources SET parametry = %s WHERE id = %s",
+                                (psycopg2.extras.Json(p), source_id))
+
+    flash("Zdroj ulozen.", "ok")
+    return redirect(url_for("source_detail", source_id=source_id))
+
+
 @app.route("/sources/<int:source_id>/delete", methods=["POST"])
 def source_delete(source_id):
     with get_db() as conn:
