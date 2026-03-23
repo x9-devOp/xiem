@@ -265,7 +265,12 @@
         <td>
           <span class="badge {{ 'badge-err' if e.typ == 'block' else 'badge-off' }}">{{ e.typ }}</span>
         </td>
-        <td style="font-size:11px;color:var(--muted)">{{ e.poznamka or '' }}</td>
+        <td style="font-size:11px;color:var(--muted)">
+          <span class="editable-note"
+                data-url="{{ url_for('source_entry_note', source_id=source.id, entry_id=e.id) }}"
+                title="Kliknout pro editaci"
+                style="cursor:text;min-width:60px;display:inline-block">{{ e.poznamka or '' }}</span>
+        </td>
         <td>
           {% if e.enabled %}
             <span class="badge badge-on">aktivni</span>
@@ -298,6 +303,31 @@
         tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
       });
     }
+    document.querySelectorAll('.editable-note').forEach(function(span) {
+      span.addEventListener('click', function() {
+        if (span.querySelector('input')) return;
+        var cur = span.textContent.trim();
+        var inp = document.createElement('input');
+        inp.type = 'text';
+        inp.value = cur;
+        inp.style.cssText = 'width:180px;padding:2px 6px;font-size:11px;background:var(--surface);color:var(--text);border:1px solid var(--accent);border-radius:3px';
+        span.textContent = '';
+        span.appendChild(inp);
+        inp.focus();
+        function save() {
+          var val = inp.value.trim();
+          var fd = new FormData();
+          fd.append('poznamka', val);
+          fetch(span.dataset.url, {method:'POST', body:fd});
+          span.textContent = val;
+        }
+        inp.addEventListener('blur', save);
+        inp.addEventListener('keydown', function(e) {
+          if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+          if (e.key === 'Escape') { span.textContent = cur; }
+        });
+      });
+    });
   </script>
   {% else %}
   <p style="color:var(--muted);font-size:13px">Zadne zaznamy. Pridejte prvni zaznam nahore.</p>

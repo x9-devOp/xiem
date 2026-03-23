@@ -1,0 +1,294 @@
+{% extends "base.html" %}
+{% block title %} — IP Lookup{% if ip %}: {{ ip }}{% endif %}{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px">
+  <div>
+    <div style="margin-bottom:6px">
+      <a href="{{ url_for('analyze') }}" style="font-size:12px;color:var(--muted);text-decoration:none">← Analyza</a>
+    </div>
+    <h1>IP Lookup{% if ip %}: <span class="mono" style="color:var(--accent)">{{ ip }}</span>{% endif %}</h1>
+  </div>
+</div>
+
+{% for category, message in get_flashed_messages(with_categories=true) %}
+  <div class="flash {{ category }}">{{ message }}</div>
+{% endfor %}
+
+<!-- Search form -->
+<div class="card" style="margin-bottom:20px">
+  <form method="GET" action="{{ url_for('analyze_lookup') }}" style="display:flex;gap:8px;align-items:flex-end">
+    <div class="form-group" style="margin:0;flex:1">
+      <label style="margin-bottom:4px;display:block">IP adresa</label>
+      <input type="text" name="ip" value="{{ ip or '' }}"
+             placeholder="napr. 1.2.3.4"
+             style="min-width:220px;font-family:monospace">
+    </div>
+    <button type="submit" class="btn btn-primary">Hledat</button>
+  </form>
+</div>
+
+{% if ip %}
+
+<!-- Score summary -->
+<div class="stat-grid" style="grid-template-columns:repeat(auto-fill,minmax(140px,1fr));margin-bottom:20px">
+  <div class="stat-card">
+    <div class="label">Celkove skore</div>
+    <div class="value accent" style="font-size:26px">{{ '%.1f'|format(total_score) }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Zdroju</div>
+    <div class="value" style="font-size:26px">{{ breakdown | length }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">V listech</div>
+    <div class="value" style="font-size:26px">{{ list_status | selectattr('in_list') | list | length }}/{{ list_status | length }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Exclude</div>
+    <div class="value" style="font-size:22px">
+      {% if in_exclude %}
+        <span style="color:var(--accent)">ANO</span>
+      {% else %}
+        <span style="color:var(--muted)">NE</span>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px">
+
+  <!-- Per-list status -->
+  <div class="card" style="margin:0">
+    <div class="card-title">Status v listech</div>
+    {% if list_status %}
+    <table>
+      <thead>
+        <tr><th>List</th><th>Skore</th><th>Status</th></tr>
+      </thead>
+      <tbody>
+        {% for ls in list_status %}
+        <tr>
+          <td><a href="{{ url_for('list_detail', list_id=ls.list_id) }}"
+                 style="color:var(--text-hi);text-decoration:none">{{ ls.list_name }}</a></td>
+          <td class="mono" style="color:{{ 'var(--accent)' if ls.score >= 3.0 else 'var(--muted)' }}">
+            {{ '%.2f'|format(ls.score) }}
+          </td>
+          <td>
+            {% if ls.in_list %}
+              <span class="badge badge-err">V listu</span>
+            {% else %}
+              <span class="badge badge-off">mimo list</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p style="color:var(--muted);font-size:13px">Zadne output listy.</p>
+    {% endif %}
+  </div>
+
+  <!-- Exclude action -->
+  <div class="card" style="margin:0">
+    <div class="card-title">Akce</div>
+    {% if in_exclude %}
+    <div style="padding:12px;background:rgba(0,212,170,0.06);border:1px solid rgba(0,212,170,0.2);border-radius:4px;margin-bottom:12px">
+      <span style="color:var(--accent);font-size:13px">
+        IP {{ ip }} je uz v excludes — nebude zahrnuta do blocklists.
+      </span>
+    </div>
+    {% endif %}
+
+    {% if manual_sources %}
+    <p style="font-size:12px;color:var(--muted);margin-bottom:12px">
+      Pridat jako <strong>exclude</strong> do vybrane manual source —
+      IP bude vynechana ze vsech blocklists.
+    </p>
+    <form method="POST" action="{{ url_for('analyze_exclude') }}">
+      <input type="hidden" name="ip" value="{{ ip }}">
+      <div class="form-row" style="gap:8px;align-items:flex-end">
+        <div class="form-group" style="margin:0;flex:1">
+          <label style="margin-bottom:4px;display:block">Manual zdroj</label>
+          <select name="source_id" style="min-width:180px">
+            {% for ms in manual_sources %}
+            <option value="{{ ms.id }}">{{ ms.nazev }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <button type="submit" class="btn btn-primary"
+                onclick="return confirm('Pridat {{ ip }} jako exclude?')">
+          + Exclude
+        </button>
+      </div>
+    </form>
+    {% else %}
+    <p style="color:var(--muted);font-size:13px">
+      Zadne manual sources nejsou k dispozici.
+      <a href="{{ url_for('sources_list') }}" style="color:var(--accent)">Vytvorit zdroj →</a>
+    </p>
+    {% endif %}
+
+    {% if total_score > 0 or breakdown %}
+    <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+      <p style="font-size:12px;color:var(--muted);margin-bottom:8px">Rychle odkazy:</p>
+      <a href="https://www.abuseipdb.com/check/{{ ip }}" target="_blank" rel="noopener"
+         class="btn btn-ghost btn-sm">AbuseIPDB ↗</a>
+      <a href="https://ipinfo.io/{{ ip }}" target="_blank" rel="noopener"
+         class="btn btn-ghost btn-sm" style="margin-left:4px">IPinfo ↗</a>
+    </div>
+    {% endif %}
+  </div>
+
+</div>
+
+<!-- Score breakdown -->
+{% if breakdown %}
+<div class="card">
+  <div class="card-title">Score breakdown</div>
+  <table style="margin-bottom:0">
+    <thead>
+      <tr><th>Zdroj</th><th>Pocet udalosti</th><th>Skore</th><th>Posledni vyskyty</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for b in breakdown | sort(attribute='score', reverse=True) %}
+      <tr>
+        <td style="font-weight:600">{{ b.label }}</td>
+        <td class="mono" style="color:var(--text-hi)">{{ b.count }}</td>
+        <td class="mono" style="color:var(--accent);font-weight:700">+{{ '%.2f'|format(b.score) }}</td>
+        <td class="mono" style="font-size:11px;color:var(--muted)">
+          {% if b.last_seen %}
+            {{ b.last_seen.strftime('%Y-%m-%d %H:%M') if b.last_seen else '—' }}
+          {% else %}—{% endif %}
+        </td>
+        <td>
+          <button class="btn btn-ghost btn-sm"
+                  onclick="toggleEvents('ev-{{ loop.index }}', this)">
+            Zobrazit ▾
+          </button>
+        </td>
+      </tr>
+      <tr id="ev-{{ loop.index }}" style="display:none">
+        <td colspan="5" style="padding:0">
+          <div style="padding:12px;background:var(--surface);border-top:1px solid var(--border)">
+
+            {% if b.ev_type == 'auth' %}
+            <table style="margin:0">
+              <thead><tr><th>Datum</th><th>Cas</th><th>Uzivatel</th><th>Server</th></tr></thead>
+              <tbody>
+                {% for e in b.events %}
+                <tr>
+                  <td class="mono" style="font-size:11px;color:var(--muted)">{{ e.datum }}</td>
+                  <td class="mono" style="font-size:11px;color:var(--muted)">{{ e.cas }}</td>
+                  <td style="font-size:11px;color:var(--muted)">{{ e.uzivatel or '—' }}</td>
+                  <td style="font-size:11px;color:var(--muted)">{{ e.sourceserver or '—' }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+
+            {% elif b.ev_type == 'eset' %}
+            <table style="margin:0">
+              <thead><tr><th>Cas</th><th>Akce</th><th>Protokol</th><th>Server</th></tr></thead>
+              <tbody>
+                {% for e in b.events %}
+                <tr>
+                  <td class="mono" style="font-size:11px;color:var(--muted);white-space:nowrap">
+                    {{ e.cas_udalosti.strftime('%Y-%m-%d %H:%M') if e.cas_udalosti else '—' }}
+                  </td>
+                  <td style="font-size:11px;color:var(--muted)">{{ e.akce or '—' }}</td>
+                  <td style="font-size:11px;color:var(--muted)">{{ e.protokol or '—' }}</td>
+                  <td style="font-size:11px;color:var(--muted)">{{ e.sourceserver or '—' }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+
+            {% elif b.ev_type == 'feed' %}
+            <table style="margin:0">
+              <thead><tr><th>Feed</th><th>Zaznam</th><th>Import</th></tr></thead>
+              <tbody>
+                {% for e in b.events %}
+                <tr>
+                  <td style="font-size:11px;color:var(--muted)">{{ e.feed_name }}</td>
+                  <td class="mono" style="font-size:11px;color:var(--accent)">{{ e.zaznam }}</td>
+                  <td class="mono" style="font-size:11px;color:var(--muted)">
+                    {{ e.importtime.strftime('%Y-%m-%d') if e.importtime else '—' }}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+
+            {% elif b.ev_type == 'script' %}
+            <table style="margin:0">
+              <thead><tr><th>Cas</th><th>Modul</th><th>Payload</th></tr></thead>
+              <tbody>
+                {% for e in b.events %}
+                <tr>
+                  <td class="mono" style="font-size:11px;color:var(--muted);white-space:nowrap">
+                    {{ e.created_at.strftime('%Y-%m-%d %H:%M') if e.created_at else '—' }}
+                  </td>
+                  <td style="font-size:11px;color:var(--muted)">{{ e.module }}</td>
+                  <td class="mono" style="font-size:10px;color:var(--muted);word-break:break-all">
+                    {{ e.payload | tojson if e.payload else '—' }}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+
+            {% elif b.ev_type == 'manual' %}
+            <table style="margin:0">
+              <thead><tr><th>Zaznam</th><th>Typ</th><th>Zdroj</th><th>Poznamka</th><th>Status</th></tr></thead>
+              <tbody>
+                {% for e in b.events %}
+                <tr>
+                  <td class="mono" style="font-size:11px;color:var(--accent)">{{ ip }}</td>
+                  <td><span class="badge {{ 'badge-err' if e.typ == 'block' else 'badge-on' }}">{{ e.typ }}</span></td>
+                  <td style="font-size:11px;color:var(--muted)">{{ e.source_name }}</td>
+                  <td style="font-size:11px;color:var(--muted)">{{ e.poznamka or '—' }}</td>
+                  <td>
+                    {% if e.enabled %}
+                      <span class="badge badge-on">aktivni</span>
+                    {% else %}
+                      <span class="badge badge-off">vypnuto</span>
+                    {% endif %}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+            {% endif %}
+
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card">
+  <p style="color:var(--muted);font-size:13px;text-align:center;padding:16px">
+    IP <span class="mono" style="color:var(--accent)">{{ ip }}</span> nebyla nalezena v zadnem zdroji.
+  </p>
+</div>
+{% endif %}
+
+{% endif %}
+
+<script>
+function toggleEvents(id, btn) {
+  var row = document.getElementById(id);
+  if (row.style.display === 'none') {
+    row.style.display = '';
+    btn.textContent = 'Skryt ▴';
+  } else {
+    row.style.display = 'none';
+    btn.textContent = 'Zobrazit ▾';
+  }
+}
+</script>
+{% endblock %}

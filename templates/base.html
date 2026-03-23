@@ -389,7 +389,7 @@
       <span class="icon">&#8593;</span> Agent binary
     </a></li>
     <div class="section-label">Analyza</div>
-    <li><a href="{{ url_for('analyze') }}" class="{{ 'active' if request.endpoint == 'analyze' }}">
+    <li><a href="{{ url_for('analyze') }}" class="{{ 'active' if request.endpoint in ('analyze', 'analyze_lookup') }}">
       <span class="icon">◎</span> Analyza
     </a></li>
     <li><a href="{{ url_for('ai_status') }}" class="{{ 'active' if request.endpoint == 'ai_status' }}">

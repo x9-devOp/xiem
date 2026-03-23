@@ -280,7 +280,7 @@ def compute_scores_for_list(conn, sources: list, threshold: float) -> dict[str, 
                     eff_vaha  = vaha if "vaha" in params else float(row["feed_vaha"] or DEFAULT_WEIGHT)
                     score_add = eff_vaha * decay(float(row["age_days"]), lam)
                     try:
-                        net = netaddr.IPNetwork(zaznam, implicit_prefix=False)
+                        net = netaddr.IPNetwork(zaznam)
                         if net.prefixlen >= 24:
                             for ip in net:
                                 ip_str = str(ip)
@@ -341,7 +341,7 @@ def compute_excludes(conn) -> netaddr.IPSet:
         """)
         for row in cur.fetchall():
             try:
-                excludes.append(netaddr.IPNetwork(row[0], implicit_prefix=False))
+                excludes.append(netaddr.IPNetwork(row[0]))
             except Exception:
                 pass
     return netaddr.IPSet(excludes)
@@ -353,7 +353,7 @@ def aggregate_to_blocklist(scored: dict[str, float], excludes: netaddr.IPSet) ->
 
     for entry, score in scored.items():
         try:
-            net = netaddr.IPNetwork(entry, implicit_prefix=False)
+            net = netaddr.IPNetwork(entry)
             if net.prefixlen == 32 or "/" not in entry:
                 ip_str = str(net.ip)
                 if netaddr.IPAddress(ip_str) not in excludes:
@@ -367,7 +367,7 @@ def aggregate_to_blocklist(scored: dict[str, float], excludes: netaddr.IPSet) ->
     subnet24: dict[str, list[str]] = {}
     for ip in ip_scores:
         try:
-            net24 = str(netaddr.IPNetwork(f"{ip}/24", implicit_prefix=False).network) + "/24"
+            net24 = str(netaddr.IPNetwork(f"{ip}/24").network) + "/24"
             subnet24.setdefault(net24, []).append(ip)
         except Exception:
             pass

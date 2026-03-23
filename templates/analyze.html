@@ -7,25 +7,212 @@
   <p>Nastroje pro vysetreni IP adres a top offenders</p>
 </div>
 
+<!-- IP Lookup -->
 <div class="card">
-  <div class="card-title">IP Lookup <span style="font-weight:400;color:var(--accent);font-size:11px">— roadmap</span></div>
-  <p style="color:var(--muted);font-size:13px">
-    Vyhledat proc je dana IP adresa v blocklistu — ktere zdroje ji pokryvaji,
-    jakou ma skore, kdy se poprve/naposledy vyskytnula.
+  <div class="card-title">IP Lookup</div>
+  <p style="color:var(--muted);font-size:13px;margin-bottom:16px">
+    Vyhledat proc je dana IP v blocklistu — ktere zdroje ji pokryvaji,
+    jakou ma skore, moznost pridat jako exclude.
   </p>
-  <div style="margin-top:16px;padding:16px;background:rgba(0,212,170,0.04);border:1px solid rgba(0,212,170,0.15);border-radius:4px">
-    <span style="font-size:12px;color:var(--muted)">Naplanovano v dalsi iteraci.</span>
-  </div>
+  <form method="GET" action="{{ url_for('analyze_lookup') }}"
+        style="display:flex;gap:8px;align-items:flex-end">
+    <div class="form-group" style="margin:0;flex:1">
+      <input type="text" name="ip" placeholder="napr. 1.2.3.4"
+             style="min-width:200px;font-family:monospace">
+    </div>
+    <button type="submit" class="btn btn-primary">Lookup →</button>
+  </form>
 </div>
 
+<!-- Time window -->
+<div style="display:flex;gap:6px;margin-bottom:20px;align-items:center">
+  <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;margin-right:4px">Okno:</span>
+  {% for w, label in [('24h','24h'),('7d','7 dní'),('30d','30 dní')] %}
+    <a href="?w={{ w }}"
+       class="btn btn-sm {{ 'btn-primary' if window == w else 'btn-ghost' }}">{{ label }}</a>
+  {% endfor %}
+</div>
+
+<!-- Auth Failures top 1000 -->
 <div class="card">
-  <div class="card-title">Top Offenders <span style="font-weight:400;color:var(--accent);font-size:11px">— roadmap</span></div>
-  <p style="color:var(--muted);font-size:13px">
-    IP adresy s nejvyssim skore across vsech zdroju — auth_failures, ESET,
-    upstream feeds, agent_events.
-  </p>
-  <div style="margin-top:16px;padding:16px;background:rgba(0,212,170,0.04);border:1px solid rgba(0,212,170,0.15);border-radius:4px">
-    <span style="font-size:12px;color:var(--muted)">Naplanovano v dalsi iteraci.</span>
+  <div class="card-title">
+    Top Auth Failures (Event 4625)
+    <span style="font-weight:400;color:var(--muted);font-size:11px;margin-left:8px">
+      za {{ {'24h':'24h','7d':'7 dní','30d':'30 dní'}[window] }} — {{ top_auth | length }} IP
+    </span>
+  </div>
+  {% if top_auth %}
+  <div style="max-height:520px;overflow-y:auto">
+  <table id="tbl-auth">
+    <thead>
+      <tr>
+        <th>IP adresa</th>
+        <th>Pocet</th>
+        <th>Posledni</th>
+        <th>Uzivatel</th>
+        <th>Server</th>
+        <th style="width:60px"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in top_auth %}
+      <tr>
+        <td class="mono" style="color:var(--accent)"
+            data-sort="{{ r.ipadresa }}">{{ r.ipadresa }}</td>
+        <td class="mono" style="color:var(--text-hi);font-weight:600"
+            data-sort="{{ '%010d'|format(r.pocet) }}">{{ r.pocet }}</td>
+        <td class="mono" style="font-size:11px;color:var(--muted);white-space:nowrap"
+            data-sort="{{ r.posledni.isoformat() if r.posledni else '' }}">
+          {{ r.posledni.strftime('%m-%d %H:%M') if r.posledni else '—' }}
+        </td>
+        <td style="font-size:11px;color:var(--muted)"
+            data-sort="{{ r.uzivatel_top or '' }}">{{ r.uzivatel_top or '—' }}</td>
+        <td style="font-size:11px;color:var(--muted)"
+            data-sort="{{ r.server_top or '' }}">{{ r.server_top or '—' }}</td>
+        <td>
+          <a href="{{ url_for('analyze_lookup', ip=r.ipadresa) }}"
+             class="btn btn-ghost btn-sm" title="Lookup">⌕</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p style="color:var(--muted);font-size:13px">Zadna data v tomto okne.</p>
+  {% endif %}
+</div>
+
+<!-- ESET top 1000 -->
+<div class="card">
+  <div class="card-title">
+    Top ESET Network Blocks
+    <span style="font-weight:400;color:var(--muted);font-size:11px;margin-left:8px">
+      za {{ {'24h':'24h','7d':'7 dní','30d':'30 dní'}[window] }} — {{ top_eset | length }} IP
+    </span>
+  </div>
+  {% if top_eset %}
+  <div style="max-height:520px;overflow-y:auto">
+  <table id="tbl-eset">
+    <thead>
+      <tr>
+        <th>IP adresa</th>
+        <th>Pocet</th>
+        <th>Posledni</th>
+        <th>Akce</th>
+        <th>Server</th>
+        <th style="width:60px"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in top_eset %}
+      <tr>
+        <td class="mono" style="color:var(--accent)"
+            data-sort="{{ r.ipadresa }}">{{ r.ipadresa }}</td>
+        <td class="mono" style="color:var(--text-hi);font-weight:600"
+            data-sort="{{ '%010d'|format(r.pocet) }}">{{ r.pocet }}</td>
+        <td class="mono" style="font-size:11px;color:var(--muted);white-space:nowrap"
+            data-sort="{{ r.posledni.isoformat() if r.posledni else '' }}">
+          {{ r.posledni.strftime('%m-%d %H:%M') if r.posledni else '—' }}
+        </td>
+        <td style="font-size:11px;color:var(--muted)"
+            data-sort="{{ r.akce_top or '' }}">{{ r.akce_top or '—' }}</td>
+        <td style="font-size:11px;color:var(--muted)"
+            data-sort="{{ r.server_top or '' }}">{{ r.server_top or '—' }}</td>
+        <td>
+          <a href="{{ url_for('analyze_lookup', ip=r.ipadresa) }}"
+             class="btn btn-ghost btn-sm" title="Lookup">⌕</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p style="color:var(--muted);font-size:13px">Zadna data v tomto okne.</p>
+  {% endif %}
+</div>
+
+<!-- Agent events top 1000 -->
+{% if top_events %}
+<div class="card">
+  <div class="card-title">
+    Top Agent Events (script moduly)
+    <span style="font-weight:400;color:var(--muted);font-size:11px;margin-left:8px">
+      za {{ {'24h':'24h','7d':'7 dní','30d':'30 dní'}[window] }} — {{ top_events | length }} zaznamu
+    </span>
+  </div>
+  <div style="max-height:520px;overflow-y:auto">
+  <table id="tbl-events">
+    <thead>
+      <tr>
+        <th>IP adresa</th>
+        <th>Pocet</th>
+        <th>Posledni</th>
+        <th>Modul / Zdroj</th>
+        <th style="width:60px"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in top_events %}
+      <tr>
+        <td class="mono" style="color:var(--accent)"
+            data-sort="{{ r.ipadresa or '' }}">{{ r.ipadresa or '—' }}</td>
+        <td class="mono" style="color:var(--text-hi);font-weight:600"
+            data-sort="{{ '%010d'|format(r.pocet) }}">{{ r.pocet }}</td>
+        <td class="mono" style="font-size:11px;color:var(--muted);white-space:nowrap"
+            data-sort="{{ r.posledni.isoformat() if r.posledni else '' }}">
+          {{ r.posledni.strftime('%m-%d %H:%M') if r.posledni else '—' }}
+        </td>
+        <td style="font-size:11px;color:var(--muted)"
+            data-sort="{{ r.source_name or r.module }}">
+          {{ r.source_name or r.module }}
+        </td>
+        <td>
+          {% if r.ipadresa and r.ipadresa != '—' %}
+          <a href="{{ url_for('analyze_lookup', ip=r.ipadresa) }}"
+             class="btn btn-ghost btn-sm" title="Lookup">⌕</a>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
   </div>
 </div>
+{% endif %}
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  if (document.getElementById('tbl-auth')) {
+    xiemTable('tbl-auth', [
+      {sort: true, filter: true,  group: true},   // IP
+      {sort: true, filter: false, group: false},  // Pocet
+      {sort: true, filter: false, group: false},  // Posledni
+      {sort: true, filter: true,  group: true},   // Uzivatel
+      {sort: true, filter: true,  group: true},   // Server
+      {sort: false,filter: false, group: false}   // Akce
+    ], {defaultGroupCols: [4]});
+  }
+  if (document.getElementById('tbl-eset')) {
+    xiemTable('tbl-eset', [
+      {sort: true, filter: true,  group: true},   // IP
+      {sort: true, filter: false, group: false},  // Pocet
+      {sort: true, filter: false, group: false},  // Posledni
+      {sort: true, filter: true,  group: true},   // Akce
+      {sort: true, filter: true,  group: true},   // Server
+      {sort: false,filter: false, group: false}   // Akce btn
+    ], {defaultGroupCols: [4]});
+  }
+  if (document.getElementById('tbl-events')) {
+    xiemTable('tbl-events', [
+      {sort: true, filter: true,  group: true},   // IP
+      {sort: true, filter: false, group: false},  // Pocet
+      {sort: true, filter: false, group: false},  // Posledni
+      {sort: true, filter: true,  group: true},   // Modul
+      {sort: false,filter: false, group: false}   // Akce btn
+    ], {defaultGroupCols: [3]});
+  }
+});
+</script>
 {% endblock %}

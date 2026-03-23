@@ -193,15 +193,18 @@ ip_field: nazev pole v JSON outputu, ktere obsahuje IP adresu (pro generate_list
 Dashboard          (prehled, stav agentu, aktivita)
 Infrastruktura:
 ├── Klienti        (seznam, detail: agenti klienta, IP restriction)
-├── Agenti         (seznam, prirazeni ke klientovi, detail: posledni prikazy + ingesty)
+├── Agenti         (seznam s xiemTable sort/filter/group, detail: posledni prikazy + ingesty)
 ├── Skupiny        (modul config: typ, interval, skript, params)
 └── Prikazy        (novy prikaz: PS/CMD/update/panic, audit log, vysledky)
-Blocklists:
-├── Upstream Feeds
-├── Manual IPs
-└── Listy          (definice, zdroje, interval_min, detail/zdroj auth_failures/eset, AI vysvetleni)
+Zdroje dat:        (unified: agent_native, upstream_http, agent_script, manual)
+└── Zdroj detail   (stats, top IPs, posledni zaznamy, editace, inline editace poznamek)
+Vystupy:
+└── Listy          (definice, zdroje s per-source scoring params, interval_min, AI vysvetleni)
 Admin:
 └── Agent binary   (nahrat novou verzi, postup aktualizace)
+Analyza:
+├── IP Lookup      (/analyze/lookup?ip= — score breakdown, per-list status, one-click exclude)
+└── Top 1000       (/analyze — top auth_failures/eset/agent_events, okno 24h/7d/30d, xiemTable)
 AI Status:         (automaticka analyza infrastruktury, generovana kazdou hodinu)
 ```
 
@@ -218,6 +221,11 @@ AI Status:         (automaticka analyza infrastruktury, generovana kazdou hodinu
   - auth_failures vaha byla 1.0 misto 0.5 (opraveno pres DB) [FIXED]
   - SignatureVerifier pouzival JavaScriptEncoder.Default ktery escapuje ' na \u0027 [FIXED]
   - AI status generoval pri kazdem page load misto na pozadi [FIXED]
+  - Agent binary nebyla rebuilt po UnsafeRelaxedJsonEscaping fixu -> PS prikazy s apostrofy selhavaly [FIXED - binary rebuilt + deployed 2026-03-10]
+  - Diagnostika: CMD prikazy fungovaly (payload bez apostrofu), PS selhavaly -> potvrdilo apostrofy jako pricinu
+- **Bugfixy (2026-03-11 az 2026-03-23):**
+  - netaddr 1.x nema implicit_prefix parametr -> IPNetwork(..., implicit_prefix=False) hazelo TypeError -> excludes vzdy prazdne [FIXED]
+  - auth_failures recent razeni podle importtime misto (datum+cas) [FIXED]
 
 ## Systemd (bezne prikazy)
 ```bash
@@ -233,12 +241,24 @@ sudo journalctl -u generate-lists.service -n 20 --no-pager
 psql "$(sudo grep XIEM_DB_DSN /etc/xiem/env | cut -d= -f2-)" -c 'SELECT 1;'
 ```
 
+## Novinky (2026-03-11 az 2026-03-23)
+- Unified Sources (sources tabulka): agent_native, upstream_http, agent_script, manual — vsechny v jednom GUI
+- Manual IPs presunuto do Sources (typ=manual), sprava zaznam inline na strance zdroje
+- /analyze/lookup: score breakdown per zdroj, per-list status, one-click exclude do manual source
+- /analyze: top 1000 auth_failures/eset/agent_events s xiemTable (sort/filter/group), okno 24h/7d/30d
+- Agenti stranka: xiemTable s multi-level groupingem (default: domain + skupina)
+- Inline editace poznamek v manual source zaznamech (klik -> input -> blur/Enter ulozi)
+- generate_lists.py: oprava netaddr 1.x kompatibility (implicit_prefix parametr neexistuje v 1.x)
+  -> compute_excludes vracel vzdy prazdny IPSet -> excludes se nepromitaly do blocklists [FIXED]
+- auth_failures recent: razeni podle (datum+cas) DESC misto importtime [FIXED]
+- PostgreSQL: otevreno pro interni site 192.168.109.0/24, 192.168.233.0/24, 10.9.252.0/24
+  listen_addresses = localhost,192.168.233.151
+
 ## Roadmap - co je dal
-- Analyze sekce: /analyze/lookup (proc je IP v blocklistu?) + /analyze/top-offenders
 - Per-source scoring parametry editovatelne pres GUI (output_list_sources.parametry JSONB)
 - Diagnostika proc auth_failures nema data od 2026-01-14 (agenti po update by meli zacit zapisovat)
 
 ## Bezpecnost DB (aktualni stav)
-- pg_hba.conf: pouze localhost (127.0.0.1/32 scram-sha-256), zadny externi pristup
-- listen_addresses = localhost (port 5432 nenasloucha navenek)
+- pg_hba.conf: localhost + 192.168.109.0/24 + 192.168.233.0/24 + 10.9.252.0/24 (scram-sha-256)
+- listen_addresses = localhost,192.168.233.151 (server LAN IP)
 - DSN s heslem: /etc/systemd/system/xiem-api.service + /etc/xiem/env (oba mimo git)

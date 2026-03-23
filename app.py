@@ -515,7 +515,375 @@ def list_interval_update(list_id):
 
 @app.route("/analyze")
 def analyze():
-    return render_template("analyze.html")
+    window = request.args.get("w", "7d")
+    window_map = {"24h": 1, "7d": 7, "30d": 30}
+    days = window_map.get(window, 7)
+
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+
+            # Top 100 auth_failures
+            cur.execute("""
+                SELECT ipadresa,
+                       COUNT(*) AS pocet,
+                       MAX((datum + cas)::timestamp) AS posledni,
+                       MODE() WITHIN GROUP (ORDER BY uzivatel) AS uzivatel_top,
+                       MODE() WITHIN GROUP (ORDER BY sourceserver) AS server_top
+                FROM auth_failures
+                WHERE datum IS NOT NULL AND cas IS NOT NULL
+                  AND datum > now()::date - (%s * interval '1 day')
+                GROUP BY ipadresa
+                ORDER BY pocet DESC
+                LIMIT 1000
+            """, (days,))
+            top_auth = cur.fetchall()
+
+            # Top 1000 eset_network_blocks
+            cur.execute("""
+                SELECT ipadresa,
+                       COUNT(*) AS pocet,
+                       MAX(cas_udalosti) AS posledni,
+                       MODE() WITHIN GROUP (ORDER BY akce) AS akce_top,
+                       MODE() WITHIN GROUP (ORDER BY sourceserver) AS server_top
+                FROM eset_network_blocks
+                WHERE cas_udalosti > now() - (%s * interval '1 day')
+                GROUP BY ipadresa
+                ORDER BY pocet DESC
+                LIMIT 1000
+            """, (days,))
+            top_eset = cur.fetchall()
+
+            # Top 1000 agent_events (grouped by module + ip)
+            cur.execute("""
+                SELECT ae.module,
+                       s.nazev AS source_name,
+                       s.parametry->>'ip_field' AS ip_field,
+                       ae.payload->>(s.parametry->>'ip_field') AS ipadresa,
+                       COUNT(*) AS pocet,
+                       MAX(ae.created_at) AS posledni
+                FROM agent_events ae
+                JOIN sources s ON s.source_type = 'agent_script'
+                  AND s.parametry->>'module' = ae.module
+                WHERE ae.created_at > now() - (%s * interval '1 day')
+                  AND ae.payload ? (s.parametry->>'ip_field')
+                GROUP BY ae.module, s.nazev, s.parametry->>'ip_field',
+                         ae.payload->>(s.parametry->>'ip_field')
+                ORDER BY pocet DESC
+                LIMIT 1000
+            """, (days,))
+            top_events = cur.fetchall()
+
+    return render_template("analyze.html",
+                           window=window,
+                           top_auth=top_auth,
+                           top_eset=top_eset,
+                           top_events=top_events)
+
+
+@app.route("/analyze/lookup")
+def analyze_lookup():
+    import math
+    ip_str = request.args.get("ip", "").strip()
+    if not ip_str:
+        return render_template("analyze_lookup.html", ip=None,
+                               breakdown=[], list_status=[], manual_sources=[],
+                               total_score=0.0, in_exclude=False)
+
+    try:
+        ip_obj = ipaddress.ip_address(ip_str)
+        ip_str = str(ip_obj)
+    except ValueError:
+        flash(f"Neplatna IP adresa: {ip_str}", "error")
+        return redirect(url_for("analyze_lookup"))
+
+    DECAY_LAM = 0.05
+    WINDOW    = 120
+
+    def _decay(age_days):
+        return math.exp(-DECAY_LAM * max(float(age_days), 0.0))
+
+    breakdown      = []
+    list_status    = []
+    in_exclude     = False
+    manual_sources = []
+
+    with get_db() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+
+            # --- auth_failures ---
+            cur.execute("""
+                SELECT datum, cas, uzivatel, sourceserver,
+                       EXTRACT(EPOCH FROM (now() - (datum + cas)::timestamp))/86400 AS age_days
+                FROM auth_failures
+                WHERE ipadresa = %s
+                  AND datum IS NOT NULL AND cas IS NOT NULL
+                  AND datum > now()::date - (%s * interval '1 day')
+                ORDER BY datum DESC, cas DESC LIMIT 200
+            """, (ip_str, WINDOW))
+            af_rows = cur.fetchall()
+            if af_rows:
+                breakdown.append({
+                    "name":      "auth_failures",
+                    "label":     "Auth Failures (Event 4625)",
+                    "score":     sum(0.5 * _decay(r["age_days"]) for r in af_rows),
+                    "count":     len(af_rows),
+                    "last_seen": af_rows[0].get("datum"),
+                    "events":    af_rows[:30],
+                    "ev_type":   "auth",
+                })
+
+            # --- eset_network_blocks ---
+            cur.execute("""
+                SELECT cas_udalosti, akce, protokol, sourceserver,
+                       EXTRACT(EPOCH FROM (now() - cas_udalosti))/86400 AS age_days
+                FROM eset_network_blocks
+                WHERE ipadresa = %s
+                  AND cas_udalosti > now() - (%s * interval '1 day')
+                ORDER BY cas_udalosti DESC LIMIT 200
+            """, (ip_str, WINDOW))
+            eset_rows = cur.fetchall()
+            if eset_rows:
+                breakdown.append({
+                    "name":      "eset_network_blocks",
+                    "label":     "ESET Network Blocks",
+                    "score":     sum(1.5 * _decay(r["age_days"]) for r in eset_rows),
+                    "count":     len(eset_rows),
+                    "last_seen": eset_rows[0].get("cas_udalosti"),
+                    "events":    eset_rows[:30],
+                    "ev_type":   "eset",
+                })
+
+            # --- upstream feeds ---
+            cur.execute("""
+                SELECT f.nazev AS feed_name, f.vaha, e.zaznam, e.importtime
+                FROM upstream_feed_entries e
+                JOIN upstream_feeds f ON f.id = e.feed_id
+                WHERE f.enabled = true AND f.list_type = 'ip'
+                  AND (e.zaznam = %s OR %s::inet << e.zaznam::inet)
+                ORDER BY e.importtime DESC
+            """, (ip_str, ip_str))
+            feed_rows = cur.fetchall()
+            if feed_rows:
+                breakdown.append({
+                    "name":      "upstream_feeds",
+                    "label":     "Upstream Feeds",
+                    "score":     sum(float(r["vaha"] or 1.0) for r in feed_rows),
+                    "count":     len(feed_rows),
+                    "last_seen": max((r["importtime"] for r in feed_rows if r["importtime"]),
+                                    default=None),
+                    "events":    feed_rows,
+                    "ev_type":   "feed",
+                })
+
+            # --- agent_script sources ---
+            cur.execute("""
+                SELECT id, nazev, parametry, vaha_default FROM sources
+                WHERE source_type = 'agent_script' AND enabled = true
+            """)
+            for ss in cur.fetchall():
+                sp       = ss["parametry"] or {}
+                module   = sp.get("module")
+                ip_field = sp.get("ip_field") or "ipadresa"
+                if not module:
+                    continue
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur2:
+                    cur2.execute("""
+                        SELECT created_at, module, payload,
+                               EXTRACT(EPOCH FROM (now() - created_at))/86400 AS age_days
+                        FROM agent_events
+                        WHERE module = %s
+                          AND payload->>%s = %s
+                          AND created_at > now() - (%s * interval '1 day')
+                        ORDER BY created_at DESC LIMIT 100
+                    """, (module, ip_field, ip_str, WINDOW))
+                    ae_rows = cur2.fetchall()
+                if ae_rows:
+                    vaha = float(ss.get("vaha_default") or 1.0)
+                    breakdown.append({
+                        "name":      f"agent_script:{ss['id']}",
+                        "label":     f"Script: {ss['nazev']} ({module})",
+                        "score":     sum(vaha * _decay(r["age_days"]) for r in ae_rows),
+                        "count":     len(ae_rows),
+                        "last_seen": ae_rows[0].get("created_at"),
+                        "events":    ae_rows[:20],
+                        "ev_type":   "script",
+                    })
+
+            # --- manual sources ---
+            cur.execute("""
+                SELECT mi.id, mi.typ, mi.poznamka, mi.enabled,
+                       s.id AS source_id, s.nazev AS source_name
+                FROM manual_ips mi
+                JOIN sources s ON s.id = mi.source_id
+                WHERE mi.zaznam = %s OR %s::inet <<= mi.zaznam::inet
+                ORDER BY s.nazev
+            """, (ip_str, ip_str))
+            manual_rows = cur.fetchall()
+            if manual_rows:
+                in_exclude   = any(r["typ"] == "exclude" for r in manual_rows)
+                manual_score = sum(10.0 for r in manual_rows
+                                   if r["typ"] == "block" and r["enabled"])
+                if manual_score > 0 or in_exclude:
+                    breakdown.append({
+                        "name":      "manual",
+                        "label":     "Manual IPs",
+                        "score":     manual_score,
+                        "count":     len(manual_rows),
+                        "last_seen": None,
+                        "events":    manual_rows,
+                        "ev_type":   "manual",
+                    })
+
+            # --- per-list status ---
+            cur.execute("""
+                SELECT id, nazev FROM output_lists
+                WHERE enabled = true AND list_type = 'ip'
+                ORDER BY nazev
+            """)
+            lists = cur.fetchall()
+            for lst in lists:
+                cur.execute("""
+                    SELECT ols.source_type, ols.source_id, ols.parametry,
+                           ols.source_ref_id,
+                           s.source_type AS src_type, s.parametry AS src_params
+                    FROM output_list_sources ols
+                    LEFT JOIN sources s ON ols.source_ref_id = s.id
+                    WHERE ols.list_id = %s AND ols.enabled = true
+                """, (lst["id"],))
+                ols_rows = cur.fetchall()
+
+                list_score = 0.0
+                threshold  = 3.0
+                for row in ols_rows:
+                    params   = row["parametry"] or {}
+                    src_type = row["src_type"] or row["source_type"]
+                    vaha     = float(params.get("vaha") or 1.0)
+                    lam      = float(params.get("decay_lambda") or DECAY_LAM)
+                    window   = int(params.get("window_days") or WINDOW)
+
+                    def _lscore(age_days):
+                        return vaha * math.exp(-lam * max(float(age_days), 0.0))
+
+                    if src_type in ("auth_failures", "agent_native") or \
+                       row["source_type"] == "auth_failures":
+                        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as c2:
+                            c2.execute("""
+                                SELECT EXTRACT(EPOCH FROM (now() - (datum+cas)::timestamp))/86400 AS age
+                                FROM auth_failures
+                                WHERE ipadresa = %s AND datum IS NOT NULL AND cas IS NOT NULL
+                                  AND datum > now()::date - (%s * interval '1 day')
+                            """, (ip_str, window))
+                            for ev in c2.fetchall():
+                                list_score += _lscore(ev["age"])
+
+                    elif src_type in ("eset_network", "eset") or \
+                         row["source_type"] == "eset_network":
+                        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as c2:
+                            c2.execute("""
+                                SELECT EXTRACT(EPOCH FROM (now() - cas_udalosti))/86400 AS age
+                                FROM eset_network_blocks
+                                WHERE ipadresa = %s
+                                  AND cas_udalosti > now() - (%s * interval '1 day')
+                            """, (ip_str, window))
+                            for ev in c2.fetchall():
+                                list_score += _lscore(ev["age"])
+
+                    elif src_type == "upstream_http" or row["source_type"] == "upstream_feed":
+                        feed_id = (row["src_params"] or {}).get("upstream_feed_id") or row["source_id"]
+                        if feed_id:
+                            cur.execute("""
+                                SELECT COUNT(*) AS n FROM upstream_feed_entries e
+                                JOIN upstream_feeds f ON f.id = e.feed_id
+                                WHERE f.id = %s AND f.enabled = true
+                                  AND (e.zaznam = %s OR %s::inet << e.zaznam::inet)
+                            """, (feed_id, ip_str, ip_str))
+                            if cur.fetchone()["n"] > 0:
+                                list_score += vaha
+
+                    elif src_type == "agent_script" or row["source_type"] == "agent_events":
+                        sp     = (row["src_params"] or {})
+                        module = sp.get("module") or params.get("module")
+                        ip_f   = sp.get("ip_field") or params.get("ip_field") or "ipadresa"
+                        if module:
+                            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as c2:
+                                c2.execute("""
+                                    SELECT EXTRACT(EPOCH FROM (now() - created_at))/86400 AS age
+                                    FROM agent_events
+                                    WHERE module = %s AND payload->>%s = %s
+                                      AND created_at > now() - (%s * interval '1 day')
+                                """, (module, ip_f, ip_str, window))
+                                for ev in c2.fetchall():
+                                    list_score += _lscore(ev["age"])
+
+                    elif src_type == "manual" or row["source_type"] == "manual":
+                        mid  = row["source_ref_id"] or row["source_id"]
+                        args = [ip_str]
+                        q    = ("SELECT COUNT(*) AS n FROM manual_ips "
+                                "WHERE typ='block' AND enabled=true AND zaznam=%s")
+                        if mid:
+                            q    += " AND source_id=%s"
+                            args.append(mid)
+                        cur.execute(q, args)
+                        if cur.fetchone()["n"] > 0:
+                            list_score += 10.0
+
+                list_status.append({
+                    "list_id":   lst["id"],
+                    "list_name": lst["nazev"],
+                    "score":     list_score,
+                    "in_list":   list_score >= threshold,
+                })
+
+            # --- manual sources available for exclude ---
+            cur.execute("""
+                SELECT id, nazev FROM sources
+                WHERE source_type = 'manual' AND enabled = true
+                ORDER BY nazev
+            """)
+            manual_sources = cur.fetchall()
+
+    total_score = sum(b["score"] for b in breakdown)
+
+    return render_template(
+        "analyze_lookup.html",
+        ip=ip_str,
+        breakdown=breakdown,
+        list_status=list_status,
+        manual_sources=manual_sources,
+        total_score=total_score,
+        in_exclude=in_exclude,
+    )
+
+
+@app.route("/analyze/exclude", methods=["POST"])
+def analyze_exclude():
+    ip_str    = request.form.get("ip", "").strip()
+    source_id = request.form.get("source_id", "").strip()
+    try:
+        ip_str = str(ipaddress.ip_address(ip_str))
+    except ValueError:
+        flash(f"Neplatna IP: {ip_str}", "error")
+        return redirect(url_for("analyze_lookup"))
+
+    try:
+        source_id = int(source_id)
+    except (ValueError, TypeError):
+        flash("Vyberte manual zdroj.", "error")
+        return redirect(url_for("analyze_lookup", ip=ip_str))
+
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO manual_ips (zaznam, list_type, typ, poznamka, source_id)
+                    VALUES (%s, 'ip', 'exclude', 'added via IP lookup', %s)
+                    ON CONFLICT DO NOTHING
+                """, (ip_str, source_id))
+        flash(f"{ip_str} pridana jako exclude.", "ok")
+    except Exception as e:
+        flash(f"Chyba: {e}", "error")
+
+    return redirect(url_for("analyze_lookup", ip=ip_str))
 
 
 # ============================================================
@@ -809,6 +1177,16 @@ def source_entry_delete(source_id, entry_id):
     return redirect(url_for("source_detail", source_id=source_id))
 
 
+@app.route("/sources/<int:source_id>/entries/<int:entry_id>/note", methods=["POST"])
+def source_entry_note(source_id, entry_id):
+    poznamka = request.form.get("poznamka", "").strip() or None
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE manual_ips SET poznamka = %s WHERE id = %s AND source_id = %s",
+                        (poznamka, entry_id, source_id))
+    return ("", 204)
+
+
 @app.route("/sources/<int:source_id>/toggle", methods=["POST"])
 def source_toggle(source_id):
     with get_db() as conn:
@@ -982,7 +1360,9 @@ def source_detail(source_id):
                     top_ips = cur.fetchall()
                     cur.execute("""
                         SELECT (datum+cas) AS ts, ipadresa, uzivatel, sourceserver
-                        FROM auth_failures ORDER BY importtime DESC LIMIT 50
+                        FROM auth_failures
+                        WHERE datum IS NOT NULL AND cas IS NOT NULL
+                        ORDER BY (datum+cas) DESC LIMIT 50
                     """)
                     recent = cur.fetchall()
 
