@@ -493,9 +493,12 @@ def agent_detail(agent_id):
             cur.execute("SELECT id, nazev FROM clients ORDER BY nazev")
             clients = cur.fetchall()
 
+            cur.execute("SELECT id, nazev FROM agent_groups ORDER BY nazev")
+            groups = cur.fetchall()
+
     return render_template("agent_detail.html",
                            agent=agent, modules=modules, commands=commands,
-                           events=events, clients=clients, now=now)
+                           events=events, clients=clients, groups=groups, now=now)
 
 
 @app.route("/lists/<int:list_id>/interval", methods=["POST"])
@@ -1696,7 +1699,20 @@ def agent_assign_client(agent_id):
             cur.execute(
                 "UPDATE agents SET client_id = %s WHERE id = %s",
                 (int(client_id) if client_id else None, agent_id))
-    return redirect(url_for("agents_list"))
+    return redirect(url_for("agent_detail", agent_id=agent_id))
+
+
+@app.route("/agents/<int:agent_id>/assign-group", methods=["POST"])
+def agent_assign_group(agent_id):
+    group_id = request.form.get("group_id") or None
+    if not group_id:
+        return redirect(url_for("agent_detail", agent_id=agent_id))
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents SET group_id = %s WHERE id = %s",
+                (int(group_id), agent_id))
+    return redirect(url_for("agent_detail", agent_id=agent_id))
 
 # ============================================================
 # Groups & Module Config

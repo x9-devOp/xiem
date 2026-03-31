@@ -193,7 +193,7 @@ ip_field: nazev pole v JSON outputu, ktere obsahuje IP adresu (pro generate_list
 Dashboard          (prehled, stav agentu, aktivita)
 Infrastruktura:
 ├── Klienti        (seznam, detail: agenti klienta, IP restriction)
-├── Agenti         (seznam s xiemTable sort/filter/group, detail: posledni prikazy + ingesty)
+├── Agenti         (seznam s xiemTable sort/filter/group, detail: posledni prikazy + ingesty, zmena skupiny + klienta)
 ├── Skupiny        (modul config: typ, interval, skript, params)
 └── Prikazy        (novy prikaz: PS/CMD/update/panic, audit log, vysledky)
 Zdroje dat:        (unified: agent_native, upstream_http, agent_script, manual)
@@ -226,6 +226,9 @@ AI Status:         (automaticka analyza infrastruktury, generovana kazdou hodinu
 - **Bugfixy (2026-03-11 az 2026-03-23):**
   - netaddr 1.x nema implicit_prefix parametr -> IPNetwork(..., implicit_prefix=False) hazelo TypeError -> excludes vzdy prazdne [FIXED]
   - auth_failures recent razeni podle importtime misto (datum+cas) [FIXED]
+- **Zmeny (2026-03-31):**
+  - agent_detail: pridano GUI pro zmenu skupiny (POST /agents/<id>/assign-group, dropdown v panelu Sprava)
+  - agent_assign_client: redirect po ulozeni vraci na detail agenta (ne na seznam)
 
 ## Systemd (bezne prikazy)
 ```bash
@@ -240,6 +243,10 @@ sudo journalctl -u generate-lists.service -n 20 --no-pager
 ```bash
 psql "$(sudo grep XIEM_DB_DSN /etc/xiem/env | cut -d= -f2-)" -c 'SELECT 1;'
 ```
+
+## Novinky (2026-03-31)
+- Agent detail: pridano GUI pro zmenu skupiny (dropdown Skupina v panelu Sprava, POST /agents/<id>/assign-group)
+- agent_assign_client: redirect po ulozeni vraci na detail agenta misto na seznam
 
 ## Novinky (2026-03-11 az 2026-03-23)
 - Unified Sources (sources tabulka): agent_native, upstream_http, agent_script, manual — vsechny v jednom GUI

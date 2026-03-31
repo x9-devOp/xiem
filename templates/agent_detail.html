@@ -57,6 +57,20 @@
           <button type="submit" class="btn btn-primary btn-sm">Ulozit</button>
         </div>
       </form>
+      <form method="POST" action="{{ url_for('agent_assign_group', agent_id=agent.id) }}"
+            style="display:flex;gap:8px;align-items:center">
+        <div class="form-group" style="flex:1;margin:0">
+          <label>Skupina</label>
+          <select name="group_id">
+            {% for g in groups %}
+            <option value="{{ g.id }}" {% if agent.group_id == g.id %}selected{% endif %}>{{ g.nazev }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div style="display:flex;align-items:flex-end">
+          <button type="submit" class="btn btn-primary btn-sm">Ulozit</button>
+        </div>
+      </form>
       <form method="POST" action="{{ url_for('agent_toggle', agent_id=agent.id) }}">
         <button type="submit" class="btn {% if agent.aktivni %}btn-danger{% else %}btn-ghost{% endif %} btn-sm">
           {{ '⏸ Deaktivovat agenta' if agent.aktivni else '▶ Aktivovat agenta' }}
