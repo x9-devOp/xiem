@@ -5,7 +5,7 @@
 <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
   <div>
     <h1>AI Status</h1>
-    <p>Automaticka analyza infrastruktury pomoci Claude AI</p>
+    <p>Analyza infrastruktury pomoci Claude AI (generuje se na vyzadani)</p>
   </div>
   <div style="display:flex;align-items:center;gap:12px">
     {% if age_min is not none %}
@@ -44,7 +44,7 @@
   </div>
 {% else %}
   <div class="card">
-    <p style="color:var(--muted);font-size:13px">Analyza bude vygenerovana do 15 sekund po startu serveru.</p>
+    <p style="color:var(--muted);font-size:13px">Analyza nebyla vygenerovana. Klikni na <strong>Aktualizovat</strong> pro spusteni.</p>
   </div>
 {% endif %}
 

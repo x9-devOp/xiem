@@ -2713,16 +2713,6 @@ def _ai_status_run():
         _AI_STATUS_GENERATING = False
 
 
-def _ai_status_loop():
-    """Background thread: generate AI status every _AI_STATUS_TTL seconds."""
-    _time.sleep(15)  # Let gunicorn workers finish starting up
-    while True:
-        if ANTHROPIC_API_KEY:
-            _ai_status_run()
-        _time.sleep(_AI_STATUS_TTL)
-
-
-_threading.Thread(target=_ai_status_loop, daemon=True, name="ai-status-bg").start()
 
 
 @app.route("/ai-status")

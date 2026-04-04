@@ -155,11 +155,10 @@ ip_field: nazev pole v JSON outputu, ktere obsahuje IP adresu (pro generate_list
 
 ## AI Status stranka
 - Route: /ai-status, template: templates/ai_status.html
-- Background daemon thread `ai-status-bg` spusten pri startu Flasku
-- Generuje analyzu kazdych 3600s (1h), prvni generovani 15s po startu
+- Generuje se pouze na vyzadani (tlacitko Aktualizovat = ?refresh=1)
+- Zadny background thread - analyza se spousti rucne
 - Vyzaduje ANTHROPIC_API_KEY v /etc/systemd/system/xiem-api.service
 - Cache: `_AI_STATUS_CACHE` dict {ts, content, error} v pameti (sdilena pres gunicorn workers ne)
-- Refresh tlacitko: ?refresh=1 spusti novy thread okamzite (pokud API key existuje)
 - Model: claude-opus-4-6 (nejschopnejsi)
 
 ## AI vysvetleni listu (list_detail.html)
